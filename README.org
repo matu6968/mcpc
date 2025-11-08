@@ -77,16 +77,17 @@ This approach certainly has some benefits and consequences:
 
 Linux:
 
-|          | GLIBC 2.31       | GLIBC 2.36       | GLIBC 2.40       |
+|          | GLIBC 2.31-2.35  | GLIBC 2.36-2.39  | GLIBC 2.40+      |
 |----------+------------------+------------------+------------------|
-| GCC 10   | 🔨✅ (Debian 11) | -                | -                |
-| GCC 12   | -                | 🔨✅ (Debian 12) | -                |
-| GCC 13   | -                | -                | -                |
-| GCC 14   | -                | -                | ✅✅ (Fedora 41) |
-| Clang 14 | -                | -                | -                |
-| Clang 16 | -                | -                | -                |
-| Clang 18 | -                | -                | -                |
-| Clang 19 | -                | -                | ✅✅ (Fedora 41) |
+| GCC 10   | 🔨✅ (Debian 11, Ubuntu 20.04, 22.04) | 🔨✅ (Ubuntu 24.04) | -                |
+| GCC 11   | 🔨✅ (Ubuntu 22.04) | 🔨✅ (Ubuntu 24.04) | -             |
+| GCC 12   | 🔨✅ (Ubuntu 20.04, 22.04) | 🔨✅ (Debian 12, Ubuntu 24.04) | -         |
+| GCC 13   | -                | 🔨✅ (Ubuntu 24.04) | -                |
+| GCC 14   | -                | ✅✅ (Ubuntu 24.04) | ✅✅ (Fedora 41) |
+| Clang 14 | 🔨✅ (Ubuntu 22.04) | 🔨✅ (Ubuntu 24.04) | -                |
+| Clang 16 | -                | 🔨✅ (Ubuntu 24.04) | -                |
+| Clang 18 | 🔨✅ (Ubuntu 20.04) | 🔨✅ (Ubuntu 24.04) | -             |
+| Clang 19 | -                | ✅✅ (Ubuntu 24.04) | ✅✅ (Fedora 41) |
 
 
 Windows:
