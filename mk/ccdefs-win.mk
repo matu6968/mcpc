@@ -6,27 +6,28 @@ ifneq (,$(and $(isnot_done_ccdefs),$(is_win)))
       is_cllike = xxx
       is_clang = xxx
       is_winclang = xxx
-      clang_ver = $(shell $(CC) --version)
-      is_clang14 = $(findstring 14.,$(clang_ver))
-      is_clang16 = $(findstring 16.,$(clang_ver))
-      is_clang19 = $(findstring 19.,$(clang_ver))
+      supports_std_c23 := $(shell echo "" | $(CC) /std:c23 -x c - -fsyntax-only >/dev/null 2>&1 && echo yes)
+      supports_std_c17 := $(shell echo "" | $(CC) /std:c17 -x c - -fsyntax-only >/dev/null 2>&1 && echo yes)
+      supports_std_c11 := $(shell echo "" | $(CC) /std:c11 -x c - -fsyntax-only >/dev/null 2>&1 && echo yes)
 
       ifeq (1,2)
-      else ifneq (,$(and $(is_clang14)))
+      else ifneq (,$(supports_std_c23))
+        CFLAGS += /std:c23
+        isnot_done_ccdefs = 
+      else ifneq (,$(supports_std_c17))
         CFLAGS += /std:c17
         CFLAGS += -DMCPC_C23PTCH_KW1
         CFLAGS += -DMCPC_C23PTCH_CKD1
         CFLAGS += -DMCPC_C23PTCH_UCHAR1
-      else ifneq (,$(and $(is_clang16)))
-        CFLAGS += /std:c17
+        isnot_done_ccdefs = 
+      else ifneq (,$(supports_std_c11))
+        CFLAGS += /std:c11
         CFLAGS += -DMCPC_C23PTCH_KW1
         CFLAGS += -DMCPC_C23PTCH_CKD1
         CFLAGS += -DMCPC_C23PTCH_UCHAR1
-      else ifneq (,$(and $(is_clang19)))
-        CFLAGS += /std:c17
-        CFLAGS += -DMCPC_C23PTCH_KW1
-        CFLAGS += -DMCPC_C23PTCH_CKD1
-        CFLAGS += -DMCPC_C23PTCH_UCHAR1
+        isnot_done_ccdefs = 
+      else
+        $(error mcpc: winclang toolchain lacks required C11 support)
       endif
 
     else

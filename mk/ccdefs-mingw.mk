@@ -29,26 +29,28 @@ ifneq (,$(and $(isnot_done_ccdefs),$(is_mingw)))
       ifneq (,$(findstring Free Software Foundation,$(cc_ver)))
           found_gcc = xxx
       endif
+      ifneq (,$(findstring clang,$(cc_ver)))
+          found_clang = xxx
+      endif
       ifneq (,$(found_gcc))
           is_gcc = xxx
           is_gcclike = xxx
           is_unixar = xxx
           is_winld = xxx
-          gcc_ver = $(shell $(CC) --version)
-          is_gcc8 = $(findstring 8.,$(gcc_ver))
-          is_gcc12 = $(findstring 12.,$(gcc_ver))
-          is_gcc13 = $(findstring 13.,$(gcc_ver))
-          is_gcc14 = $(findstring 14.,$(gcc_ver))
       endif
       ifneq (,$(found_clang))
           is_clang = xxx
           is_gcclike = xxx
           is_unixar = xxx
           is_winld = xxx
-          clang_ver = $(shell $(CC) --version)
-          is_clang18 = $(findstring 18.,$(clang_ver))
-          is_clang19 = $(findstring 19.,$(clang_ver))
       endif
+    endif
+
+    ifeq (,$(is_cllike))
+      supports_std_c23 := $(shell echo "" | $(CC) -std=c23 -x c - -fsyntax-only >/dev/null 2>&1 && echo yes)
+      supports_std_gnu2x := $(shell echo "" | $(CC) -std=gnu2x -x c - -fsyntax-only >/dev/null 2>&1 && echo yes)
+      supports_std_c17 := $(shell echo "" | $(CC) -std=c17 -x c - -fsyntax-only >/dev/null 2>&1 && echo yes)
+      supports_std_c11 := $(shell echo "" | $(CC) -std=c11 -x c - -fsyntax-only >/dev/null 2>&1 && echo yes)
     endif
 
     ifeq (1,2)
@@ -66,24 +68,29 @@ ifneq (,$(and $(isnot_done_ccdefs),$(is_mingw)))
         is_winlib = xxx
         is_cl = xxx
         isnot_done_ccdefs = 
-    else ifneq (,$(and $(is_gcc8)))
-        CFLAGS += -std=c11
-        CFLAGS += -DMCPC_C23PTCH_KW1
-        CFLAGS += -DMCPC_C23PTCH_CKD1
-        CFLAGS += -DMCPC_C23PTCH_UCHAR1
-        CFLAGS += -DMCPC_C23GIVUP_FIXENUM
+    else ifneq (,$(supports_std_c23))
+        CFLAGS += -std=c23
+        CFLAGS += -DMCPC_C23PTCH_UCHAR2
         isnot_done_ccdefs = 
-    else ifneq (,$(and $(is_gcc12)))
+    else ifneq (,$(supports_std_gnu2x))
+        CFLAGS += -std=gnu2x
+        CFLAGS += -DMCPC_C23PTCH_UCHAR2
+        isnot_done_ccdefs = 
+    else ifneq (,$(supports_std_c17))
         CFLAGS += -std=c17
         CFLAGS += -DMCPC_C23PTCH_KW1
         CFLAGS += -DMCPC_C23PTCH_CKD1
         CFLAGS += -DMCPC_C23PTCH_UCHAR1
         CFLAGS += -DMCPC_C23GIVUP_FIXENUM
         isnot_done_ccdefs = 
-    else ifneq (,$(and $(is_gcc14)))
-        # fc41
-        CFLAGS += -std=c23
-        CFLAGS += -DMCPC_C23PTCH_UCHAR2
+    else ifneq (,$(supports_std_c11))
+        CFLAGS += -std=c11
+        CFLAGS += -DMCPC_C23PTCH_KW1
+        CFLAGS += -DMCPC_C23PTCH_CKD1
+        CFLAGS += -DMCPC_C23PTCH_UCHAR1
+        CFLAGS += -DMCPC_C23GIVUP_FIXENUM
         isnot_done_ccdefs = 
+    else
+        $(error mcpc: mingw toolchain lacks required C11 support)
     endif
 endif

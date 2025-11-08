@@ -13,41 +13,39 @@ ifneq (,$(and $(isnot_done_ccdefs),$(is_macos)))
     ifneq (,$(found_gcc))
       is_gcc = xxx
       is_gcclike = xxx
-      gcc_ver = $(shell $(CC) --version)
-      is_gcc12 = $(findstring 12.,$(gcc_ver))
-      is_gcc13 = $(findstring 13.,$(gcc_ver))
-      is_gcc14 = $(findstring 14.,$(gcc_ver))
     else ifneq (,$(found_clang))
       is_clang = xxx
       is_gcclike = xxx
-      clang_ver = $(shell $(CC) --version)
-      is_clang14 = $(findstring 14.,$(clang_ver))
-      is_clang15 = $(findstring 15.,$(clang_ver))
-      is_clang16 = $(findstring 16.,$(clang_ver))
     endif
 
+    supports_std_c23 := $(shell echo "" | $(CC) -std=c23 -x c - -fsyntax-only >/dev/null 2>&1 && echo yes)
+    supports_std_gnu2x := $(shell echo "" | $(CC) -std=gnu2x -x c - -fsyntax-only >/dev/null 2>&1 && echo yes)
+    supports_std_c17 := $(shell echo "" | $(CC) -std=c17 -x c - -fsyntax-only >/dev/null 2>&1 && echo yes)
+    supports_std_c11 := $(shell echo "" | $(CC) -std=c11 -x c - -fsyntax-only >/dev/null 2>&1 && echo yes)
+
     ifeq (1,2)
-    else ifneq (,$(and $(is_clang14)))
+    else ifneq (,$(supports_std_c23))
+      CFLAGS += -std=c23
+      isnot_done_ccdefs = 
+    else ifneq (,$(supports_std_gnu2x))
+      CFLAGS += -std=gnu2x
+      isnot_done_ccdefs = 
+    else ifneq (,$(supports_std_c17))
       CFLAGS += -std=c17
       CFLAGS += -DMCPC_C23PTCH_KW1
       CFLAGS += -DMCPC_C23PTCH_CKD1
       CFLAGS += -DMCPC_C23PTCH_UCHAR1
       CFLAGS += -Dno_c23_n2508
       isnot_done_ccdefs = 
-    else ifneq (,$(and $(is_clang15)))
-      CFLAGS += -std=c17
+    else ifneq (,$(supports_std_c11))
+      CFLAGS += -std=c11
       CFLAGS += -DMCPC_C23PTCH_KW1
       CFLAGS += -DMCPC_C23PTCH_CKD1
       CFLAGS += -DMCPC_C23PTCH_UCHAR1
       CFLAGS += -Dno_c23_n2508
       isnot_done_ccdefs = 
-    else ifneq (,$(and $(is_clang16)))
-      CFLAGS += -std=c17
-      CFLAGS += -DMCPC_C23PTCH_KW1
-      CFLAGS += -DMCPC_C23PTCH_CKD1
-      CFLAGS += -DMCPC_C23PTCH_UCHAR1
-      CFLAGS += -Dno_c23_n2508
-      isnot_done_ccdefs = 
+    else
+      $(error mcpc: macos toolchain lacks required C11 support)
     endif
 
 endif
