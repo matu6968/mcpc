@@ -29,11 +29,13 @@ ifneq (,$(and $(isnot_done_ccdefs),$(is_linux)))
     isnot_done_ccdefs =
   else ifneq (,$(supports_std_gnu2x))
     CFLAGS += -std=gnu2x
+    CFLAGS += -DMCPC_C23PTCH_KW1
+    CFLAGS += -DMCPC_C23PTCH_UCHAR1
+    CFLAGS += -DMCPC_C23GIVUP_FIXENUM
     isnot_done_ccdefs =
   else ifneq (,$(supports_std_c17))
     CFLAGS += -std=c17
     CFLAGS += -DMCPC_C23PTCH_KW1
-    CFLAGS += -DMCPC_C23PTCH_CKD1
     CFLAGS += -DMCPC_C23PTCH_UCHAR1
     CFLAGS += -DMCPC_C23GIVUP_FIXENUM
     isnot_done_ccdefs =
