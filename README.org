@@ -75,26 +75,30 @@ This approach certainly has some benefits and consequences:
 
 =-= : /the platform does not exist, or work in progress/
 
+=*= : /Compiler does not fully implement atleast C11, untested/
+
 Linux:
 
-|          | GLIBC 2.31-2.35  | GLIBC 2.36-2.39  | GLIBC 2.40+      |
-|----------+------------------+------------------+------------------|
-| GCC 10   | 🔨✅ (Debian 11, Ubuntu 20.04, 22.04) | 🔨✅ (Ubuntu 24.04) | -                |
-| GCC 11   | 🔨✅ (Ubuntu 22.04) | 🔨✅ (Ubuntu 24.04) | -             |
-| GCC 12   | 🔨✅ (Ubuntu 20.04, 22.04) | 🔨✅ (Debian 12, Ubuntu 24.04) | -         |
-| GCC 13   | -                | 🔨✅ (Ubuntu 24.04) | -                |
-| GCC 14   | -                | ✅✅ (Ubuntu 24.04) | ✅✅ (Fedora 41) |
-| Clang 14 | 🔨✅ (Ubuntu 22.04) | 🔨✅ (Ubuntu 24.04) | -                |
-| Clang 16 | -                | 🔨✅ (Ubuntu 24.04) | -                |
-| Clang 18 | 🔨✅ (Ubuntu 20.04) | 🔨✅ (Ubuntu 24.04) | -             |
-| Clang 19 | -                | ✅✅ (Ubuntu 24.04) | ✅✅ (Fedora 41) |
+|          | GLIBC   | musl libc |
+|----------+----------+----------|
+| GCC 4.6  | 🔨✅*   |   🔨✅*   |
+| GCC 4.7  | 🔨✅*   |   🔨✅*   |
+| GCC 4.8-13 | 🔨✅   |   🔨✅   |
+| GCC 14+  | ✅✅   |     🔨✅   |
+| Clang 3.3-3.8 | 🔨✅*   |  🔨✅*   |
+| Clang 3.9 | 🔨✅   | 🔨✅   |
+| Clang 4-18 | 🔨✅   | 🔨✅   |
+| Clang 19+ | ✅✅   | 🔨✅   |
 
+
+**NOTE:** musl libc does not support C23 features properly regardless of the compiler.
 
 Windows:
 
 |          | CMD/PS | Cygwin | MinGW |
 |----------+--------+--------+-------|
-| MSVC 19  | 🔨✅   | -      | -     |
+| MSVC 15/16  | 🔨✅*  | -      | -     |
+| MSVC 17-19  | 🔨✅   | -      | -     |
 | Clang 19 | -      | -      | -     |
 | GCC 14   | -      | ✅✅   | ✅✅  |
 

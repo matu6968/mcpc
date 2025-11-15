@@ -11,12 +11,34 @@ ifneq (,$(and $(isnot_done_ccdefs),$(is_linux)))
       found_clang = xxx
   endif
 
+
+is_musl = $(shell ldd --version 2>/dev/null | grep -i musl || echo not_musl)
+is_glibc = $(shell ldd --version 2>/dev/null | grep -i glibc || echo not_glibc)
+is_musl_gcc = $(shell which musl-gcc 2>/dev/null && echo found || echo not_found)
+
+ifneq ($(is_musl),not_musl)
+    found_musl = xxx
+else ifneq ($(is_glibc),not_glibc)
+    found_glibc = xxx
+else ifneq ($(is_musl_gcc),not_found)
+    found_musl = xxx
+endif
+
+
   ifneq (,$(found_gcc))
     is_gcc = xxx
     is_gcclike = xxx
   else ifneq (,$(found_clang))
     is_clang = xxx
     is_gcclike = xxx
+  endif
+
+  ifneq (,$(is_musl))
+    CFLAGS += -DMCPC_C23PTCH_KW1
+    CFLAGS += -DMCPC_C23PTCH_UCHAR1
+    CFLAGS += -DMCPC_C23GIVUP_FIXENUM
+    # Disable warnings as errors for musl
+    CFLAGS += -Wno-error
   endif
 
   supports_std_c23 := $(shell echo "" | $(CC) -std=c23 -x c - -fsyntax-only >/dev/null 2>&1 && echo yes)

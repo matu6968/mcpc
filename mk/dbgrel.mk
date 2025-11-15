@@ -2,11 +2,29 @@
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 # dbgrel
 
+is_musl = $(shell ldd --version 2>/dev/null | grep -i musl || echo not_musl)
+is_glibc = $(shell ldd --version 2>/dev/null | grep -i glibc || echo not_glibc) 
+is_musl_gcc = $(shell which musl-gcc 2>/dev/null && echo found || echo not_found)
+
+ifneq ($(is_musl),not_musl)
+    found_musl = xxx
+else ifneq ($(is_glibc),not_glibc)
+    found_glibc = xxx
+else ifneq ($(is_musl_gcc),not_found)
+    found_musl = xxx
+endif
+
+ifneq (,$(is_musl))
+  CFLAGS += -Wno-error
+else
+  CFLAGS += -Werror
+endif
+
 ifdef DBG
   ifeq (1,2)
   else ifneq (,$(is_gcclike))
     CFLAGS += -g -O0
-    CFLAGS += -Wall -Wextra -Werror -Wno-unused-function -Wno-unused-parameter -Wno-unused-label
+    CFLAGS += -Wall -Wextra -Wno-unused-function -Wno-unused-parameter -Wno-unused-label
     CFLAGS += -DMCPC_DBG
     CFLAGS += -I..
   else ifneq (,$(is_cllike))
@@ -19,7 +37,7 @@ ifdef DBG
 else
   ifeq (1,2)
   else ifneq (,$(is_gcclike))
-    CFLAGS += -Wall -Wextra -Werror -Wno-unused-function -Wno-unused-parameter -Wno-unused-label -Wno-error=unused-variable -Wno-error=unused-but-set-variable
+    CFLAGS += -Wall -Wextra -Wno-unused-function -Wno-unused-parameter -Wno-unused-label -Wno-error=unused-variable -Wno-error=unused-but-set-variable
     CFLAGS += -O2 -Os
     CFLAGS += -I..
   else ifneq (,$(is_cllike))

@@ -170,6 +170,8 @@ This approach certainly has some benefits and consequences:
 
 `-` : *the platform does not exist, or work in progress*
 
+`*` : *Compiler does not fully implement atleast C11, untested*
+
 Linux:
 
 <table border="2" cellspacing="0" cellpadding="6" rules="groups" frame="hsides">
@@ -187,81 +189,64 @@ Linux:
 <thead>
 <tr>
 <th scope="col" class="org-left">&#xa0;</th>
-<th scope="col" class="org-left">GLIBC 2.31-2.35</th>
-<th scope="col" class="org-left">GLIBC 2.36-2.39</th>
-<th scope="col" class="org-left">GLIBC 2.40+</th>
+<th scope="col" class="org-left">GLIBC</th>
+<th scope="col" class="org-left">musl libc</th>
 </tr>
 </thead>
 
 <tbody>
 <tr>
-<td class="org-left">GCC 10</td>
-<td class="org-left">🔨✅ (Debian 11, Ubuntu 20.04, 22.04)</td>
-<td class="org-left">🔨✅ (Ubuntu 24.04)</td>
-<td class="org-left">-</td>
+<td class="org-left">GCC 4.6</td>
+<td class="org-left">🔨✅*</td>
+<td class="org-left">🔨✅*</td>
 </tr>
 
 <tbody>
 <tr>
-<td class="org-left">GCC 11</td>
-<td class="org-left">🔨✅ (Ubuntu 22.04)</td>
-<td class="org-left">🔨✅ (Ubuntu 24.04)</td>
-<td class="org-left">-</td>
+<td class="org-left">GCC 4.7</td>
+<td class="org-left">🔨✅*</td>
+<td class="org-left">🔨✅*</td>
 </tr>
 
 <tr>
-<td class="org-left">GCC 12</td>
-<td class="org-left">🔨✅ (Ubuntu 20.04, 22.04)</td>
-<td class="org-left">🔨✅ (Debian 12, Ubuntu 24.04)</td>
-<td class="org-left">-</td>
-</tr>
-
-
-<tr>
-<td class="org-left">GCC 13</td>
-<td class="org-left">-</td>
-<td class="org-left">🔨✅ (Ubuntu 24.04)</td>
-<td class="org-left">-</td>
+<td class="org-left">GCC 4.8-13</td>
+<td class="org-left">🔨✅</td>
+<td class="org-left">🔨✅</td>
 </tr>
 
 
 <tr>
-<td class="org-left">GCC 14</td>
-<td class="org-left">-</td>
-<td class="org-left">✅✅ (Ubuntu 24.04)</td>
-<td class="org-left">✅✅ (Fedora 41)</td>
+<td class="org-left">GCC 14+</td>
+<td class="org-left">✅✅</td>
+<td class="org-left">🔨✅</td>
 </tr>
 
 
 <tr>
-<td class="org-left">Clang 14</td>
-<td class="org-left">🔨✅ (Ubuntu 22.04)</td>
-<td class="org-left">🔨✅ (Ubuntu 24.04)</td>
-<td class="org-left">-</td>
+<td class="org-left">Clang 3.3-3.8</td>
+<td class="org-left">🔨✅*</td>
+<td class="org-left">🔨✅* (Fedora 41)</td>
 </tr>
 
 
 <tr>
-<td class="org-left">Clang 16</td>
-<td class="org-left">-</td>
-<td class="org-left">🔨✅ (Ubuntu 24.04)</td>
-<td class="org-left">-</td>
+<td class="org-left">Clang 3.9</td>
+<td class="org-left">🔨✅</td>
+<td class="org-left">🔨✅</td>
 </tr>
 
 
 <tr>
-<td class="org-left">Clang 18</td>
-<td class="org-left">🔨✅ (Ubuntu 20.04)</td>
-<td class="org-left">🔨✅ (Ubuntu 24.04)</td>
-<td class="org-left">-</td>
+<td class="org-left">Clang 4-18</td>
+<td class="org-left">🔨✅</td>
+<td class="org-left">🔨✅</td>
 </tr>
 
 
 <tr>
-<td class="org-left">Clang 19</td>
-<td class="org-left">-</td>
-<td class="org-left">✅✅ (Ubuntu 24.04)</td>
-<td class="org-left">✅✅ (Fedora 41)</td>
+<td class="org-left">Clang 19+</td>
+<td class="org-left">✅✅</td>
+<td class="org-left">🔨✅</td>
 </tr>
 </tbody>
 </table>
@@ -291,12 +276,18 @@ Windows:
 
 <tbody>
 <tr>
-<td class="org-left">MSVC 19</td>
-<td class="org-left">🔨✅</td>
+<td class="org-left">MSVC 15/16</td>
+<td class="org-left">🔨✅*</td>
 <td class="org-left">-</td>
 <td class="org-left">-</td>
 </tr>
 
+<tr>
+<td class="org-left">MSVC 17-19</td>
+<td class="org-left">🔨✅</td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+</tr>
 
 <tr>
 <td class="org-left">Clang 19</td>
