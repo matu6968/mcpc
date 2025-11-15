@@ -225,7 +225,7 @@ Linux:
 <tr>
 <td class="org-left">Clang 3.3-3.8</td>
 <td class="org-left">🔨✅*</td>
-<td class="org-left">🔨✅* (Fedora 41)</td>
+<td class="org-left">🔨✅*</td>
 </tr>
 
 
@@ -250,6 +250,8 @@ Linux:
 </tr>
 </tbody>
 </table>
+
+**NOTE:** musl libc does not support C23 features properly regardless of the compiler.
 
 Windows:
 
