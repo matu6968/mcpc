@@ -33,7 +33,7 @@ endif
     is_gcclike = xxx
   endif
 
-  ifneq (,$(is_musl))
+  ifneq (,$(found_musl))
     CFLAGS += -DMCPC_C23PTCH_KW1
     CFLAGS += -DMCPC_C23PTCH_UCHAR1
     CFLAGS += -DMCPC_C23GIVUP_FIXENUM

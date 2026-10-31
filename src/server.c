@@ -29,6 +29,7 @@
 #include <mcpc/anydata.h>
 #include "errcode.h"
 #include "log.h"
+#include "frame.h"
 #include "retbuf.h"
 #include "rsc.h"
 #include "tool.h"
@@ -67,17 +68,16 @@ _new_mjson_fixedbuf ()
   return fbuf;
 }
 
-void
-ensure_buf_suffi (struct mjson_fixedbuf *fbuf, size_t ipt_len)
+// Send a serialized result (takes ownership of rtbf). A buffer that could not
+// be fully written is reported as an internal error rather than sent truncated.
+static void
+_reply_retbuf (struct jsonrpc_request *r, mcpc_sock_t csock, retbuf_t rtbf)
 {
-  bug_if_zero (ipt_len);
-  if (ipt_len <= (size_t) fbuf->size)
-    {
-      return;
-    }
-
-  fbuf->ptr = mcpc_realloc (fbuf->ptr, ipt_len);
-  fbuf->size = ipt_len;
+  if (!retbuf_is_ok (rtbf) || retbuf_len (rtbf) == 0)
+    jsonrpc_return_error (r, JSONRPC_ERROR_INTERNAL, "failed to serialize response", NULL);
+  else
+    jsonrpc_return_success2 (r, mcpc_sock_invalid (csock), "%.*s", (int) retbuf_len (rtbf), retbuf_data (rtbf));
+  retbuf_free (rtbf);
 }
 
 void
@@ -142,7 +142,7 @@ _tulc_jstr_get_field_u8str (struct jsonrpc_request *r, const char8_t *jstr, size
   return MCPC_EC_0;
 
 field_invalid:
-  jsonrpc_return_error (r, JSONRPC_ERROR_NOT_FOUND, "field invalid", "%Q", jpathnt2);
+  jsonrpc_return_error (r, JSONRPC_ERROR_BAD_PARAMS, "field invalid", "%Q", jpathnt2);
   return MCPC_EC_JSON_FIELD_INVALID;
 }
 
@@ -169,7 +169,7 @@ _tulc_jparams_getref_field_obj (struct jsonrpc_request *r, const char8_t *jpathn
   return MCPC_EC_0;
 
 field_invalid:
-  jsonrpc_return_error (r, JSONRPC_ERROR_NOT_FOUND, "field invalid", "%Q", jpathnt2);
+  jsonrpc_return_error (r, JSONRPC_ERROR_BAD_PARAMS, "field invalid", "%Q", jpathnt2);
   return MCPC_EC_JSON_FIELD_INVALID;
 }
 
@@ -189,7 +189,7 @@ _tulc_jparams_getref_field_u8str_q (struct jsonrpc_request *r, const char8_t *jp
   return MCPC_EC_0;
 
 field_invalid:
-  jsonrpc_return_error (r, JSONRPC_ERROR_NOT_FOUND, "field invalid", "%Q", jpathnt2);
+  jsonrpc_return_error (r, JSONRPC_ERROR_BAD_PARAMS, "field invalid", "%Q", jpathnt2);
   return MCPC_EC_JSON_FIELD_INVALID;
 }
 
@@ -212,7 +212,7 @@ _tulc_jstr_get_field_number (struct jsonrpc_request *r, const char8_t *jstr, siz
   return MCPC_EC_0;
 
 field_invalid:
-  jsonrpc_return_error (r, JSONRPC_ERROR_NOT_FOUND, "field invalid", "%Q", jpathnt2);
+  jsonrpc_return_error (r, JSONRPC_ERROR_BAD_PARAMS, "field invalid", "%Q", jpathnt2);
   return MCPC_EC_JSON_FIELD_INVALID;
 }
 
@@ -261,6 +261,7 @@ mcpc_server_new (mcpc_server_type_t typ, mcpc_toolpool_t *toolpool, u32_t vabeg,
   sv->prmptpool = mcpc_prmptpool_new ();
   sv->rscpool = mcpc_rscpool_new ();
   sv->rpcres = _new_mjson_fixedbuf ();
+  mcpc_mutex_init (&sv->mu);
   sv->connpool = mcpc_alloc (sizeof (mcpc_connpool_t));
   _connpool_init ((mcpc_connpool_t *) sv->connpool);
 
@@ -499,6 +500,56 @@ mcpc_server_supp_complt (const mcpc_server_t *sv)
 }
 
 
+// Write the accumulated response in sv->rpcres to the peer and reset it.
+// A peer that went away is not an error for the server, so failures are dropped.
+static void
+_flush_rpcres (mcpc_server_t *sv, mcpc_sock_t csock)
+{
+  if (sv->rpcres.len <= 0)
+    return;
+
+  if (sv->typ == MCPC_SV_IOSTRM)
+    {
+      tuflog_d ("sv->rpcres:%.*s", sv->rpcres.len, sv->rpcres.ptr);
+      mcpc_conn_t *outconn = mcpc_connpool_getconn (sv->connpool, 1);
+      FILE *out_strm = outconn != nullptr ? mcpc_conn_getstrm (outconn) : nullptr;
+      if (out_strm != nullptr)
+	{
+	  fwrite (sv->rpcres.ptr, 1, (size_t) sv->rpcres.len, out_strm);
+	  fflush (out_strm);
+	}
+    }
+  else if (sv->typ == MCPC_SV_TCP)
+    {
+      size_t sent = 0;
+      while (sent < (size_t) sv->rpcres.len)
+	{
+#if is_unix
+	  const ssize_t n = send (csock, sv->rpcres.ptr + sent, (size_t) sv->rpcres.len - sent, MSG_NOSIGNAL);
+#else
+	  const int n = send (csock, sv->rpcres.ptr + sent, sv->rpcres.len - (int) sent, 0);
+#endif
+	  if (n <= 0)
+	    break;
+	  sent += (size_t) n;
+	}
+    }
+
+  sv->rpcres.len = 0;
+}
+
+// An incoming object exceeded the size limit and was dropped; its id is unknown.
+static void
+_reply_toobig (mcpc_server_t *sv, mcpc_sock_t csock)
+{
+  struct jsonrpc_request r;
+  memset (&r, 0, sizeof (r));
+  r.fn = mcpc_print_grow;
+  r.fn_data = (void *) &sv->rpcres;
+  jsonrpc_return_error (&r, JSONRPC_ERROR_INVALID_REQUEST, "message too large", NULL);
+  _flush_rpcres (sv, csock);
+}
+
 // ----------------------------- iostrm -----------------------------
 
 mcpc_errcode_t
@@ -511,73 +562,26 @@ _wait_iostrm (mcpc_server_t *sv)
 
   FILE *in_strm = mcpc_conn_getstrm (conn0);
   mcpc_assert (in_strm != nullptr, MCPC_EC_BUG);
-  FILE *out_strm = mcpc_conn_getstrm (conn0);
-  mcpc_assert (out_strm != nullptr, MCPC_EC_BUG);
+
+  mcpc_framer_t framer;
+  mcpc_framer_init (&framer, MCPC_FRAME_DEFAULT_MAX);
 
   int ch;
-  int n_brace = 0;
-  bool start_read = false;
-  bool enter_str = false;
-  size_t rbuf_cap = BUFCAP_INIT_JSONREQ;
-  char *rbuf = mcpc_alloc (rbuf_cap);
-  char *rbuf_p = rbuf;
-  char last_read = 0;
-  char lastlast_read = 0;
-
-  while (!feof (in_strm))
+  while ((ch = getc (in_strm)) != EOF)
     {
-
-      ch = getc (in_strm);
-
-      if (!enter_str && ch == CH_LBRC)
+      const mcpc_frame_stat_t st = mcpc_framer_push (&framer, (unsigned char) ch);
+      if (st == MCPC_FRAME_READY)
 	{
-	  n_brace += 1;
-	  if (!start_read)
-	    start_read = true;
+	  handle_inone (sv, framer.buf, framer.len, (mcpc_sock_t) - 1);
+	  mcpc_framer_next (&framer);
 	}
-
-      if (!start_read)
-	{
-	  continue;
-	}
-
-      if (start_read)
-	{
-	  *rbuf_p = (char) ch;
-	  rbuf_p += 1;
-	  lastlast_read = last_read;
-	  last_read = (char) ch;
-	  if (rbuf_p - rbuf >= (ptrdiff_t) rbuf_cap)
-	    {
-	      size_t oldcap = rbuf_cap;
-	      rbuf_cap += rbuf_cap;
-	      rbuf = mcpc_realloc (rbuf, rbuf_cap);
-	      rbuf_p = rbuf + oldcap;
-	    }
-	}
-
-      if (!enter_str && last_read == CH_RBRC)
-	{
-	  n_brace -= 1;
-	  if (n_brace == 0)
-	    {
-	      ptrdiff_t nread = rbuf_p - rbuf;
-	      rbuf[nread - 1] = CH_RBRC;
-	      rbuf[nread] = 0x00;
-
-	      handle_inone (sv, rbuf, (size_t) nread, (mcpc_sock_t) - 1);
-	      rbuf_p = rbuf;
-	      start_read = false;
-	      enter_str = false;
-	    }
-	}
-      if (last_read == CH_QUO && lastlast_read != CH_BSLASH)
-	{
-	  enter_str = !enter_str;
-	}
+      else if (st == MCPC_FRAME_TOOBIG)
+	_reply_toobig (sv, (mcpc_sock_t) - 1);
+      else if (st == MCPC_FRAME_NOMEM)
+	break;
     }
 
-  free (rbuf);
+  mcpc_framer_free (&framer);
 
   return MCPC_EC_0;
 }
@@ -668,80 +672,59 @@ _wait_conn (void *args)
 
   tulog_d ("New connection from client IP address %s and port %d", inet_ntoa (caddr.sin_addr), ntohs (caddr.sin_port));
 
-  char ch;
-  int n_brace = 0;
-  bool start_read = false;
-  bool enter_str = false;
-  size_t rbuf_cap = BUFCAP_INIT_JSONREQ;
-  char *rbuf = mcpc_alloc (rbuf_cap);
-  char *rbuf_p = rbuf;
-  i32_t last_nrecv = 0;
-  char last_read = 0;
-  char lastlast_read = 0;
+  mcpc_mutex_lock (&sv->mu);
+  mcpc_conn_t *myconn = mcpc_conn_new (MCPC_CONN_FD, &csock);
+  const mcpc_errcode_t regec = mcpc_connpool_addref ((mcpc_connpool_t *) sv->connpool, myconn);
+  mcpc_mutex_unlock (&sv->mu);
+  if (regec != MCPC_EC_0)
+    {
+      // too many clients: refuse this one but keep serving the others
+      tulog_d ("connection refused, pool full");
+      mcpc_conn_free (myconn);
+      goto conn_done;
+    }
+
+  mcpc_framer_t framer;
+  mcpc_framer_init (&framer, MCPC_FRAME_DEFAULT_MAX);
 
   while (true)
     {
-      last_nrecv = recv (csock, &ch, 1, 0);
-      if (false)
-	;
-      else if (last_nrecv == 0)
-	{
-	  break;
-	}
-      else if (last_nrecv < 0)
+      char ch;
+      const i32_t last_nrecv = (i32_t) recv (csock, &ch, 1, 0);
+      if (last_nrecv == 0)
+	break;
+      if (last_nrecv < 0)
 	{
 	  tulog_d ("recv err %s", strerror (errno));
 	  break;
 	}
 
-      if (!enter_str && ch == CH_LBRC)
+      const mcpc_frame_stat_t st = mcpc_framer_push (&framer, (unsigned char) ch);
+      if (st == MCPC_FRAME_READY)
 	{
-	  n_brace += 1;
-	  if (!start_read)
-	    start_read = true;
+	  mcpc_mutex_lock (&sv->mu);
+	  handle_inone (sv, framer.buf, framer.len, csock);
+	  mcpc_mutex_unlock (&sv->mu);
+	  mcpc_framer_next (&framer);
+	  tulog_d ("one msg handled");
 	}
-
-      if (!start_read)
+      else if (st == MCPC_FRAME_TOOBIG)
 	{
-	  continue;
+	  mcpc_mutex_lock (&sv->mu);
+	  _reply_toobig (sv, csock);
+	  mcpc_mutex_unlock (&sv->mu);
 	}
-
-      if (start_read)
-	{
-	  *rbuf_p = ch;
-	  rbuf_p += 1;
-	  lastlast_read = last_read;
-	  last_read = ch;
-	  if (rbuf_p - rbuf >= (ptrdiff_t) rbuf_cap)
-	    {
-	      rbuf_cap += rbuf_cap;
-	      rbuf = mcpc_realloc (rbuf, rbuf_cap);
-	    }
-	}
-
-      if (!enter_str && last_read == CH_RBRC)
-	{
-	  n_brace -= 1;
-	  if (n_brace == 0)
-	    {
-	      ptrdiff_t nread = rbuf_p - rbuf;
-	      rbuf[nread - 1] = CH_RBRC;
-	      rbuf[nread] = 0x00;
-	      handle_inone (sv, rbuf, (size_t) nread, csock);
-	      rbuf_p = rbuf;
-	      start_read = false;
-	      enter_str = false;
-	      tulog_d ("one msg handled");
-	    }
-	}
-      if (last_read == CH_QUO && lastlast_read != CH_BSLASH)
-	{
-	  enter_str = !enter_str;
-	}
+      else if (st == MCPC_FRAME_NOMEM)
+	break;
     }
 
-  free (rbuf);
+  mcpc_framer_free (&framer);
 
+  mcpc_mutex_lock (&sv->mu);
+  mcpc_connpool_remove_by_sock ((mcpc_connpool_t *) sv->connpool, csock);
+  mcpc_mutex_unlock (&sv->mu);
+
+conn_done:
 #ifdef is_unix
   close (csock);
 #endif
@@ -814,6 +797,8 @@ _svimpl_tcp (mcpc_server_t *sv)
 	  free (args);
 	  close (csock);
 	}
+      else
+	pthread_detach (thread);
 #endif
 #ifdef is_win
       HANDLE thread;
@@ -890,9 +875,10 @@ mcpc_server_close (mcpc_server_t *sv)
       sv->ver_len = 0;
     }
 
-  free (sv->rpcres.ptr);
+  mcpc_print_grow_free (&sv->rpcres);
+  mcpc_mutex_destroy (&sv->mu);
   mcpc_toolpool_free ((mcpc_toolpool_t *) sv->toolpool);
-  mcpc_rscpool_free ((mcpc_rscpool_t *) sv->prmptpool);
+  mcpc_prmptpool_free ((mcpc_prmptpool_t *) sv->prmptpool);
   mcpc_rscpool_free ((mcpc_rscpool_t *) sv->rscpool);
   mcpc_connpool_free ((mcpc_connpool_t *) sv->connpool);
 
@@ -1042,6 +1028,27 @@ mcpc_connpool_find_by_sock (const mcpc_connpool_t *connpool, mcpc_sock_t sock)
   return nullptr;
 }
 
+// Unlink and free the connection owning sock. Other nodes stay intact.
+mcpc_errcode_t
+mcpc_connpool_remove_by_sock (mcpc_connpool_t *connpool, mcpc_sock_t sock)
+{
+  mcpc_conn_t **link = &connpool->head;
+  while (*link != nullptr)
+    {
+      mcpc_conn_t *cur = *link;
+      if (cur->typ == MCPC_CONN_FD && cur->fd == sock)
+	{
+	  *link = cur->nex;
+	  cur->nex = nullptr;	// mcpc_conn_free frees the whole chain
+	  mcpc_conn_free (cur);
+	  connpool->len -= 1;
+	  return MCPC_EC_0;
+	}
+      link = &cur->nex;
+    }
+  return MCPC_EC_BUG;
+}
+
 mcpc_errcode_t
 mcpc_conn_set_cname (mcpc_conn_t *conn, const ch8_t *const cname, const u8_t cname_len)
 {
@@ -1059,12 +1066,12 @@ _handle_initbeg (mcpc_server_t *sv, struct jsonrpc_request *r, mcpc_sock_t csock
   mcpc_conn_t *conn = mcpc_connpool_find_by_sock (sv->connpool, csock);
   if (conn == nullptr)
     {
-      jsonrpc_return_error (r, JSONRPC_ERROR_NOT_FOUND, "connection not found", NULL);
+      jsonrpc_return_error (r, JSONRPC_ERROR_INTERNAL, "connection not found", NULL);
       goto output_res;
     }
   if (conn->client_init == MCPC_INIT_SUCC)
     {
-      jsonrpc_return_error (r, JSONRPC_ERROR_NOT_FOUND, "conn already initialized", NULL);
+      jsonrpc_return_error (r, JSONRPC_ERROR_INVALID_REQUEST, "conn already initialized", NULL);
       goto output_res;
     }
 
@@ -1103,16 +1110,10 @@ _handle_initbeg (mcpc_server_t *sv, struct jsonrpc_request *r, mcpc_sock_t csock
 
   // TODO P6 capabilities negotiation
 
-  char *buftpool = nullptr;
-  size_t buftpool_len = 0;
-  const size_t buftpool_cap = 1024;
-  buftpool = mcpc_alloc (buftpool_cap);
-  retbuf_t rtbf = { buftpool_cap, buftpool, &buftpool_len };
+  retbuf_t rtbf = retbuf_new (1024);
+  mcpc_assert (rtbf != nullptr, MCPC_EC_BUG);
   mcpc_assert (!serlz_initres (rtbf, sv), MCPC_EC_BUG);
-  mcpc_assert (buftpool != nullptr, MCPC_EC_BUG);
-  mcpc_assert (buftpool_len > 0, MCPC_EC_BUG);
-  jsonrpc_return_success2 (r, mcpc_sock_invalid (csock), "%.*s", buftpool_len, buftpool);
-  free (buftpool);		// TODO intn_free
+  _reply_retbuf (r, csock, rtbf);
 
   conn->client_init = MCPC_INIT_BEG;
 
@@ -1127,12 +1128,12 @@ _handle_initdone (mcpc_server_t *sv, struct jsonrpc_request *r, mcpc_sock_t csoc
   mcpc_conn_t *conn = mcpc_connpool_find_by_sock (sv->connpool, csock);
   if (conn == nullptr)
     {
-      jsonrpc_return_error (r, JSONRPC_ERROR_NOT_FOUND, "connection not found", NULL);
+      jsonrpc_return_error (r, JSONRPC_ERROR_INTERNAL, "connection not found", NULL);
       goto output_res;
     }
   if (conn->client_init != MCPC_INIT_BEG)
     {
-      jsonrpc_return_error (r, JSONRPC_ERROR_NOT_FOUND, "client not begin init", NULL);
+      jsonrpc_return_error (r, JSONRPC_ERROR_INVALID_REQUEST, "client not begin init", NULL);
       goto output_res;
     }
 
@@ -1150,25 +1151,19 @@ _handle_tools_list (mcpc_server_t *sv, struct jsonrpc_request *r, mcpc_sock_t cs
   mcpc_conn_t *conn = mcpc_connpool_find_by_sock (sv->connpool, csock);
   if (conn == nullptr)
     {
-      jsonrpc_return_error (r, JSONRPC_ERROR_NOT_FOUND, "connection not found", NULL);
+      jsonrpc_return_error (r, JSONRPC_ERROR_INTERNAL, "connection not found", NULL);
       goto output_res;
     }
   if (conn->client_init != MCPC_INIT_SUCC)
     {
-      jsonrpc_return_error (r, JSONRPC_ERROR_NOT_FOUND, "client not initialized", NULL);
+      jsonrpc_return_error (r, JSONRPC_ERROR_INVALID_REQUEST, "client not initialized", NULL);
       goto output_res;
     }
 
-  char *buftpool = nullptr;
-  size_t buftpool_len = 0;
-  const size_t buftpool_cap = 1024;
-  buftpool = mcpc_alloc (buftpool_cap);
-  retbuf_t rtbf = { buftpool_cap, buftpool, &buftpool_len };
+  retbuf_t rtbf = retbuf_new (1024);
+  mcpc_assert (rtbf != nullptr, MCPC_EC_BUG);
   mcpc_assert (!serlz_toolpool (rtbf, sv->toolpool), MCPC_EC_BUG);
-  mcpc_assert (buftpool != nullptr, MCPC_EC_BUG);
-  mcpc_assert (buftpool_len > 0, MCPC_EC_BUG);
-  jsonrpc_return_success2 (r, mcpc_sock_invalid (csock), "%.*s", buftpool_len, buftpool);
-  free (buftpool);		// TODO intn_free
+  _reply_retbuf (r, csock, rtbf);
 
 output_res:
   return;
@@ -1186,25 +1181,19 @@ _handle_prmpt_list (mcpc_server_t *sv, struct jsonrpc_request *r, mcpc_sock_t cs
   mcpc_conn_t *conn = mcpc_connpool_find_by_sock (sv->connpool, csock);
   if (conn == nullptr)
     {
-      jsonrpc_return_error (r, JSONRPC_ERROR_NOT_FOUND, "connection not found", NULL);
+      jsonrpc_return_error (r, JSONRPC_ERROR_INTERNAL, "connection not found", NULL);
       goto output_res;
     }
   if (conn->client_init != MCPC_INIT_SUCC)
     {
-      jsonrpc_return_error (r, JSONRPC_ERROR_NOT_FOUND, "client not initialized", NULL);
+      jsonrpc_return_error (r, JSONRPC_ERROR_INVALID_REQUEST, "client not initialized", NULL);
       goto output_res;
     }
 
-  char *buftpool = nullptr;
-  size_t buftpool_len = 0;
-  const size_t buftpool_cap = 1024;
-  buftpool = mcpc_alloc (buftpool_cap);
-  retbuf_t rtbf = { buftpool_cap, buftpool, &buftpool_len };
+  retbuf_t rtbf = retbuf_new (1024);
+  mcpc_assert (rtbf != nullptr, MCPC_EC_BUG);
   mcpc_assert (!serlz_prmptpool (rtbf, sv->prmptpool), MCPC_EC_BUG);
-  mcpc_assert (buftpool != nullptr, MCPC_EC_BUG);
-  mcpc_assert (buftpool_len > 0, MCPC_EC_BUG);
-  jsonrpc_return_success2 (r, mcpc_sock_invalid (csock), "%.*s", buftpool_len, buftpool);
-  free (buftpool);		// TODO intn_free
+  _reply_retbuf (r, csock, rtbf);
 
 output_res:
   return;
@@ -1217,25 +1206,19 @@ _handle_lsrsc (mcpc_server_t *sv, struct jsonrpc_request *r, mcpc_sock_t csock)
   mcpc_conn_t *conn = mcpc_connpool_find_by_sock (sv->connpool, csock);
   if (conn == nullptr)
     {
-      jsonrpc_return_error (r, JSONRPC_ERROR_NOT_FOUND, "connection not found", NULL);
+      jsonrpc_return_error (r, JSONRPC_ERROR_INTERNAL, "connection not found", NULL);
       goto output_res;
     }
   if (conn->client_init != MCPC_INIT_SUCC)
     {
-      jsonrpc_return_error (r, JSONRPC_ERROR_NOT_FOUND, "client not initialized", NULL);
+      jsonrpc_return_error (r, JSONRPC_ERROR_INVALID_REQUEST, "client not initialized", NULL);
       goto output_res;
     }
 
-  char *buftpool = nullptr;
-  size_t buftpool_len = 0;
-  const size_t buftpool_cap = 1024;
-  buftpool = mcpc_alloc (buftpool_cap);
-  retbuf_t rtbf = { buftpool_cap, buftpool, &buftpool_len };
+  retbuf_t rtbf = retbuf_new (1024);
+  mcpc_assert (rtbf != nullptr, MCPC_EC_BUG);
   mcpc_assert (!serlz_rscpool (rtbf, sv->rscpool), MCPC_EC_BUG);
-  mcpc_assert (buftpool != nullptr, MCPC_EC_BUG);
-  mcpc_assert (buftpool_len > 0, MCPC_EC_BUG);
-  jsonrpc_return_success2 (r, mcpc_sock_invalid (csock), "%.*s", buftpool_len, buftpool);
-  free (buftpool);		// TODO intn_free
+  _reply_retbuf (r, csock, rtbf);
 
 output_res:
   return;
@@ -1247,12 +1230,12 @@ _handle_tools_call (mcpc_server_t *sv, struct jsonrpc_request *r, mcpc_sock_t cs
   mcpc_conn_t *conn = mcpc_connpool_find_by_sock (sv->connpool, csock);
   if (conn == nullptr)
     {
-      jsonrpc_return_error (r, JSONRPC_ERROR_NOT_FOUND, "connection not found", NULL);
+      jsonrpc_return_error (r, JSONRPC_ERROR_INTERNAL, "connection not found", NULL);
       goto output_res;
     }
   if (conn->client_init != MCPC_INIT_SUCC)
     {
-      jsonrpc_return_error (r, JSONRPC_ERROR_NOT_FOUND, "client not initialized", NULL);
+      jsonrpc_return_error (r, JSONRPC_ERROR_INVALID_REQUEST, "client not initialized", NULL);
       goto output_res;
     }
 
@@ -1268,7 +1251,7 @@ _handle_tools_call (mcpc_server_t *sv, struct jsonrpc_request *r, mcpc_sock_t cs
   const mcpc_tool_t *tool = (const mcpc_tool_t *) mcpc_toolpool_getbyname (sv->toolpool, callname, callname_len);
   if (tool == nullptr)
     {
-      jsonrpc_return_error (r, JSONRPC_ERROR_NOT_FOUND, "tool not found", NULL);
+      jsonrpc_return_error (r, JSONRPC_ERROR_BAD_PARAMS, "tool not found", NULL);
       goto output_res;
     }
 
@@ -1335,21 +1318,14 @@ _handle_tools_call (mcpc_server_t *sv, struct jsonrpc_request *r, mcpc_sock_t cs
   mcpc_tool_get_call_cb (tool, &callcb);
   callcb (tool, ucbr);
 
-  char *buftpool = nullptr;
-  size_t buftpool_len = 0;
-  const size_t buftpool_cap = mcpc_ucbr_get_serlz_lenhint (ucbr);
-  buftpool = mcpc_alloc (buftpool_cap);
-  retbuf_t rtbf = { buftpool_cap, buftpool, &buftpool_len };
+  retbuf_t rtbf = retbuf_new (mcpc_ucbr_get_serlz_lenhint (ucbr));
+  mcpc_assert (rtbf != nullptr, MCPC_EC_BUG);
 
   serlz_tool_callres (rtbf, ucbr);
-  mcpc_assert (buftpool != nullptr, MCPC_EC_BUG);
-  mcpc_assert (buftpool_len > 0, MCPC_EC_BUG);
 
-  ensure_buf_suffi (&sv->rpcres, buftpool_cap);
-  jsonrpc_return_success2 (r, mcpc_sock_invalid (csock), "%.*s", buftpool_len, buftpool);
+  _reply_retbuf (r, csock, rtbf);
 
   mcpc_ucbr_free (ucbr);
-  free (buftpool);		// TODO intn_free
 
 output_res:
   return;
@@ -1367,12 +1343,12 @@ _handle_prmpt_call (mcpc_server_t *sv, struct jsonrpc_request *r, mcpc_sock_t cs
   mcpc_conn_t *conn = mcpc_connpool_find_by_sock (sv->connpool, csock);
   if (conn == nullptr)
     {
-      jsonrpc_return_error (r, JSONRPC_ERROR_NOT_FOUND, "connection not found", NULL);
+      jsonrpc_return_error (r, JSONRPC_ERROR_INTERNAL, "connection not found", NULL);
       goto output_res;
     }
   if (conn->client_init != MCPC_INIT_SUCC)
     {
-      jsonrpc_return_error (r, JSONRPC_ERROR_NOT_FOUND, "client not initialized", NULL);
+      jsonrpc_return_error (r, JSONRPC_ERROR_INVALID_REQUEST, "client not initialized", NULL);
       goto output_res;
     }
 
@@ -1388,7 +1364,7 @@ _handle_prmpt_call (mcpc_server_t *sv, struct jsonrpc_request *r, mcpc_sock_t cs
   const mcpc_prmpt_t *prmpt = (const mcpc_prmpt_t *) mcpc_prmptpool_getbyname (sv->prmptpool, callname, callname_len);
   if (prmpt == nullptr)
     {
-      jsonrpc_return_error (r, JSONRPC_ERROR_NOT_FOUND, "prmopt not found", NULL);
+      jsonrpc_return_error (r, JSONRPC_ERROR_BAD_PARAMS, "prompt not found", NULL);
       goto output_res;
     }
 
@@ -1431,20 +1407,14 @@ _handle_prmpt_call (mcpc_server_t *sv, struct jsonrpc_request *r, mcpc_sock_t cs
   mcpc_prmpt_get_callcb (prmpt, &callcb);
   callcb (prmpt, ucbr);
 
-  char *buftpool = nullptr;
-  size_t buftpool_len = 0;
-  const size_t buftpool_cap = 1024;
-  buftpool = mcpc_alloc (buftpool_cap);
-  retbuf_t rtbf = { buftpool_cap, buftpool, &buftpool_len };
+  retbuf_t rtbf = retbuf_new (1024);
+  mcpc_assert (rtbf != nullptr, MCPC_EC_BUG);
 
   serlz_prmpt_callres (rtbf, ucbr);
-  mcpc_assert (buftpool != nullptr, MCPC_EC_BUG);
-  mcpc_assert (buftpool_len > 0, MCPC_EC_BUG);
 
-  jsonrpc_return_success2 (r, mcpc_sock_invalid (csock), "%.*s", buftpool_len, buftpool);
+  _reply_retbuf (r, csock, rtbf);
 
   mcpc_ucbr_free (ucbr);
-  free (buftpool);		// TODO intn_free
 
 output_res:
   return;
@@ -1463,12 +1433,12 @@ _handle_complt_complt (mcpc_server_t *sv, struct jsonrpc_request *r, mcpc_sock_t
   mcpc_conn_t *conn = mcpc_connpool_find_by_sock (sv->connpool, csock);
   if (conn == nullptr)
     {
-      jsonrpc_return_error (r, JSONRPC_ERROR_NOT_FOUND, "connection not found", NULL);
+      jsonrpc_return_error (r, JSONRPC_ERROR_INTERNAL, "connection not found", NULL);
       goto output_res;
     }
   if (conn->client_init != MCPC_INIT_SUCC)
     {
-      jsonrpc_return_error (r, JSONRPC_ERROR_NOT_FOUND, "client not initialized", NULL);
+      jsonrpc_return_error (r, JSONRPC_ERROR_INVALID_REQUEST, "client not initialized", NULL);
       goto output_res;
     }
 
@@ -1489,7 +1459,7 @@ _handle_complt_complt (mcpc_server_t *sv, struct jsonrpc_request *r, mcpc_sock_t
 
   if (askfor_what < 0)
     {
-      jsonrpc_return_error (r, JSONRPC_ERROR_NOT_FOUND, "<ref.type> invalid", NULL);
+      jsonrpc_return_error (r, JSONRPC_ERROR_BAD_PARAMS, "<ref.type> invalid", NULL);
       return;
     }
 
@@ -1531,14 +1501,14 @@ _handle_complt_complt (mcpc_server_t *sv, struct jsonrpc_request *r, mcpc_sock_t
       const mcpc_prmpt_t *tgt_prmpt = mcpc_prmptpool_getbyname (sv->prmptpool, compref_name, compref_name_len);
       if (tgt_prmpt == nullptr)
 	{
-	  jsonrpc_return_error (r, JSONRPC_ERROR_NOT_FOUND, "prompt not found", "%.*Q", compref_name_len, compref_name);
+	  jsonrpc_return_error (r, JSONRPC_ERROR_BAD_PARAMS, "prompt not found", "%.*Q", compref_name_len, compref_name);
 	  return;
 	}
 
       const mcpc_prmptarg_t *tgt_prmptarg = mcpc_prmpt_getbyname_prmptarg (tgt_prmpt, comparg_name, comparg_name_len);
       if (tgt_prmptarg == nullptr)
 	{
-	  jsonrpc_return_error (r, JSONRPC_ERROR_NOT_FOUND, "promptarg not found", "%.*Q", comparg_name_len,
+	  jsonrpc_return_error (r, JSONRPC_ERROR_BAD_PARAMS, "promptarg not found", "%.*Q", comparg_name_len,
 				comparg_name);
 	  return;
 	}
@@ -1557,26 +1527,15 @@ _handle_complt_complt (mcpc_server_t *sv, struct jsonrpc_request *r, mcpc_sock_t
 
   bug_if_nullptr (complt);
 
-  char *buftpool = nullptr;
-  size_t buftpool_len = 0;
-  const size_t buftpool_cap = 1024;
-  buftpool = mcpc_alloc (buftpool_cap);
-  retbuf_t rtbf = { buftpool_cap, buftpool, &buftpool_len };
+  retbuf_t rtbf = retbuf_new (1024);
+  mcpc_assert (rtbf != nullptr, MCPC_EC_BUG);
 
   serlz_complt (rtbf, complt);
   mcpc_complt_free (complt);
 
-  // buftpool_len =
-  // sprintf (buftpool, " %.*s %.*s %.*s %.*s", (int) comparg_name_len, comparg_name, (int) comparg_val_len, comparg_val,
-  // (int) compref_type_len, compref_type, (int) compref_type_len, compref_type);
-  // strcpy (buftpool, "xxxxx");
 
-  mcpc_assert (buftpool != nullptr, MCPC_EC_BUG);
-  mcpc_assert (buftpool_len > 0, MCPC_EC_BUG);
+  _reply_retbuf (r, csock, rtbf);
 
-  jsonrpc_return_success2 (r, mcpc_sock_invalid (csock), "%.*s", buftpool_len, buftpool);
-
-  free (buftpool);		// TODO intn_free
 
 output_res:
   return;
@@ -1601,18 +1560,40 @@ void
 handle_inone (mcpc_server_t *sv, const char *const rbuf, size_t nread, mcpc_sock_t csock)
 {
   bool noreply = false;
+  bool is_notif = false;
   tuflog_d ("rbuf:%.*s", nread, rbuf);
   struct jsonrpc_request r;
+  memset (&r, 0, sizeof (r));
   r.ctx = &jsonrpc_default_context;
   r.frame = rbuf;
   r.frame_len = (int) nread;
-  r.fn = mjson_print_fixed_buf;
+  r.fn = mcpc_print_grow;
   r.fn_data = (void *) &sv->rpcres;
-  // TODO: r.method useless?
 
-  // check id
-  mjson_find (rbuf, (int) nread, "$.id", &r.id, &r.id_len);
-  // TODO...check id
+  // the frame must be one JSON object, anything else cannot carry an id to answer to
+  const char *top = nullptr;
+  int top_len = 0;
+  const int top_tok = mjson_find (rbuf, (int) nread, "$", &top, &top_len);
+  if (top_tok == MJSON_TOK_INVALID)
+    {
+      jsonrpc_return_error (&r, JSONRPC_ERROR_INVALID, "parse error", NULL);
+      goto output_res;
+    }
+  if (top_tok != MJSON_TOK_OBJECT)
+    {
+      jsonrpc_return_error (&r, JSONRPC_ERROR_INVALID_REQUEST, "invalid request", NULL);
+      goto output_res;
+    }
+
+  // check id, only numbers and strings are valid ids
+  {
+    const int id_tok = mjson_find (rbuf, (int) nread, "$.id", &r.id, &r.id_len);
+    if (id_tok != MJSON_TOK_NUMBER && id_tok != MJSON_TOK_STRING)
+      {
+	r.id = nullptr;
+	r.id_len = 0;
+      }
+  }
 
   // check method
   // Method must exist and must be a string
@@ -1620,19 +1601,36 @@ handle_inone (mcpc_server_t *sv, const char *const rbuf, size_t nread, mcpc_sock
   int32_t methodname_q_len = 0;
   if (mjson_find (rbuf, (int) nread, "$.method", (const char **) &methodname_q, &methodname_q_len) != MJSON_TOK_STRING)
     {
-      mjson_printf (r.fn, r.fn_data, "{\"error\":{\"code\":-32700,\"message\":%.*Q}}\n", nread, rbuf);
+      const char *dummy = nullptr;
+      int dummy_len = 0;
+      // a response (e.g. to a request the server sent) has no method and needs no answer
+      if (mjson_find (rbuf, (int) nread, "$.result", &dummy, &dummy_len) != MJSON_TOK_INVALID ||
+	  mjson_find (rbuf, (int) nread, "$.error", &dummy, &dummy_len) != MJSON_TOK_INVALID)
+	noreply = true;
+      else
+	jsonrpc_return_error (&r, JSONRPC_ERROR_INVALID_REQUEST, "invalid request", NULL);
       goto output_res;
     }
-  if (methodname_q == nullptr || methodname_q_len == 0)
+
+  // a request without id is a notification, which must never be answered
+  is_notif = (r.id_len == 0);
+
+  // methodname_q includes the quotes; real method names are short
+  const int32_t methodname_max = 128;
+  if (methodname_q_len < 3 || methodname_q_len > methodname_max)
     {
       jsonrpc_return_error (&r, JSONRPC_ERROR_NOT_FOUND, "method not found", NULL);
       goto output_res;
     }
 
-  char8_t *methodname = alloca (methodname_q_len + 1);
+  char8_t methodname[128 + 1];
   int32_t methodname_len = mjson_get_string ((const char *) methodname_q, methodname_q_len, "$",
-					     (char *) methodname, methodname_q_len);
-  bug_if (methodname_len == 0);
+					     (char *) methodname, methodname_max);
+  if (methodname_len <= 0)
+    {
+      jsonrpc_return_error (&r, JSONRPC_ERROR_NOT_FOUND, "method not found", NULL);
+      goto output_res;
+    }
   methodname[methodname_len] = 0;
 
   mcpc_metho_t handle_what = MCPC_METHO_UNKNOWN;	// nothing
@@ -1668,16 +1666,9 @@ handle_inone (mcpc_server_t *sv, const char *const rbuf, size_t nread, mcpc_sock
       mjson_find (rbuf, (int) nread, "$.params", &r.params, &r.params_len);
       if (r.params_len < 1)
 	{
-	  jsonrpc_return_error (&r, JSONRPC_ERROR_NOT_FOUND, "no params", NULL);
+	  jsonrpc_return_error (&r, JSONRPC_ERROR_BAD_PARAMS, "no params", NULL);
 	  goto output_res;
 	}
-    }
-
-  // TODO proper to do this here?
-  if (csock > 0)
-    {				// TODO: more accurate?
-      mcpc_conn_t *conn0 = mcpc_conn_new (MCPC_CONN_FD, &csock);
-      mcpc_assert (MCPC_EC_0 == mcpc_connpool_addref ((mcpc_connpool_t *) sv->connpool, conn0), MCPC_EC_BUG);
     }
 
   if (false)
@@ -1700,22 +1691,12 @@ handle_inone (mcpc_server_t *sv, const char *const rbuf, size_t nread, mcpc_sock
     _handle_complt_complt (sv, &r, csock);
 
 output_res:
-  if (noreply)
+  if (noreply || (is_notif && top_tok == MJSON_TOK_OBJECT))
+    {
+      sv->rpcres.len = 0;
+      return;
+    }
+  if (sv->rpcres.len == 0)
     return;
-  if (false)
-    ;
-  else if (sv->typ == MCPC_SV_IOSTRM)
-    {
-      // TODO use provided strm
-      tuflog_d ("sv->rpcres:%.*s", sv->rpcres.len, sv->rpcres.ptr);
-      int pres = fprintf (stdout, "%.*s", sv->rpcres.len, sv->rpcres.ptr);
-      mcpc_assert (pres >= 0, MCPC_EC_BUG);
-      fflush (stdout);
-      sv->rpcres.len = 0;
-    }
-  else if (sv->typ == MCPC_SV_TCP)
-    {
-      mcpc_assert (0 < send (csock, sv->rpcres.ptr, sv->rpcres.len, 0), MCPC_EC_BUG);
-      sv->rpcres.len = 0;
-    }
+  _flush_rpcres (sv, csock);
 }

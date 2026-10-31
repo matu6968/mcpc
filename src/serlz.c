@@ -377,26 +377,36 @@ serlz_capasresources (retbuf_t rtbf, const mcpc_server_t *sv)
 uint8_t
 serlz_capas (retbuf_t rtbf, const mcpc_server_t *sv)
 {
+  // members are comma-separated, so emit the separator before every member but the first
+  const char *sep = "";
+
   rtbuf_printf_mjfmt (rtbf, u8c1 ("{"));
 
   if (mcpc_server_supp_prompts (sv))
     {
-      rtbuf_printf_mjfmt (rtbf, u8c1 ("%Q:"), "prompts");
+      rtbuf_printf_mjfmt (rtbf, u8c1 ("%s%Q:"), sep, "prompts");
       serlz_capasprompts (rtbf, sv);
-      rtbuf_printf_mjfmt (rtbf, u8c1 (","));
+      sep = ",";
     }
 
   if (mcpc_server_supp_tools (sv))
     {
-      rtbuf_printf_mjfmt (rtbf, u8c1 ("%Q:"), "tools");
+      rtbuf_printf_mjfmt (rtbf, u8c1 ("%s%Q:"), sep, "tools");
       serlz_capastools (rtbf, sv);
-      rtbuf_printf_mjfmt (rtbf, u8c1 (","));
+      sep = ",";
     }
 
   if (mcpc_server_supp_rscs (sv))
     {
-      rtbuf_printf_mjfmt (rtbf, u8c1 ("%Q:"), "resources");
+      rtbuf_printf_mjfmt (rtbf, u8c1 ("%s%Q:"), sep, "resources");
       serlz_capasresources (rtbf, sv);
+      sep = ",";
+    }
+
+  if (mcpc_server_supp_complt (sv))
+    {
+      rtbuf_printf_mjfmt (rtbf, u8c1 ("%s%Q:{}"), sep, "completions");
+      sep = ",";
     }
 
   rtbuf_printf_mjfmt (rtbf, u8c1 ("}"));
@@ -406,7 +416,7 @@ serlz_capas (retbuf_t rtbf, const mcpc_server_t *sv)
 uint8_t
 serlz_initres (retbuf_t rtbf, const mcpc_server_t *sv)
 {
-  rtbuf_printf (rtbf, u8c1 ("{"));
+  rtbuf_printf_mjfmt (rtbf, u8c1 ("{"));
   rtbuf_printf_mjfmt (rtbf, u8c1 ("%Q:%Q"), "protocolVersion", "2024-11-05");
   rtbuf_printf_mjfmt (rtbf, u8c1 (","));
   rtbuf_printf_mjfmt (rtbf, u8c1 ("%Q:"), "serverInfo");

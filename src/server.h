@@ -26,6 +26,7 @@
 #include <mcpc/server.h>
 
 #include "ext_stdint.h"
+#include "ext_mutex.h"
 
 #include "errcode.h"
 #include "mjson.h"
@@ -127,8 +128,11 @@ struct mcpc_server
   const mcpc_rscpool_t *rscpool;
   struct mjson_fixedbuf rpcres;
   const mcpc_connpool_t *connpool;
+  mcpc_mutex_t mu;		// serializes request handling across connection threads
 };
 // implication: for iostrm server, the first conn will be used as client init status storing
+mcpc_errcode_t mcpc_connpool_remove_by_sock (mcpc_connpool_t * connpool, mcpc_sock_t sock);
+
 // check mcpc_connpool_find_by_sock
 
 #define MCPC_CAPA_PRMT         0b0000000000000001
@@ -168,6 +172,8 @@ bool mcpc_server_supp_rscs (const mcpc_server_t * sv);
 bool mcpc_server_supp_rscs_lschg (const mcpc_server_t * sv);
 
 bool mcpc_server_supp_rscs_subs (const mcpc_server_t * sv);
+
+bool mcpc_server_supp_complt (const mcpc_server_t * sv);
 
 enum mcpc_metho
 {

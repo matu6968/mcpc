@@ -41,6 +41,5 @@ lvlog (LogLevel lv, const char *meta, FILE *stream, const char *format, ...)
   vfprintf (stream, format, args);
   fprintf (stream, "\n");
   fflush (stream);
-  fclose (stream);
   va_end (args);
 }

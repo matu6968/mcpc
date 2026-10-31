@@ -105,4 +105,8 @@ itst-svcalc_EXEC: itst-svcalc_LINKE
 	$(if $(and $(is_indirsh),$(is_cllike)) , ./itst-svcalc.exe iostrm -i itst-svcalc-req-resourceslist-1.json 1>>$@.stdout.log 2>>$@.stderr.log )
 	$(if $(and $(is_indirsh),$(is_gcclike)) , ./itst-svcalc.out iostrm -i itst-svcalc-req-resourceslist-1.json 1>>$@.stdout.log 2>>$@.stderr.log )
 	$(if $(is_valg) , valgrind --leak-check=full --show-leak-kinds=all --errors-for-leak-kinds=all --error-exitcode=222 ./itst-svcalc.out iostrm -i itst-svcalc-req-resourceslist-1.json 1>/dev/null 2>/dev/null )
+	# itst-svcalc response contents (needs python3, skipped otherwise)
+	$(if $(and $(is_dirsh),$(shell command -v python3 2>/dev/null)) , python3 -I rpctst.py ./itst-svcalc.out )
+	$(if $(and $(is_dirsh),$(shell command -v python3 2>/dev/null),$(is_valg)) , python3 -I rpctst.py ./itst-svcalc.out valgrind )
+	$(if $(and $(is_dirsh),$(if $(shell command -v python3 2>/dev/null),,x)) , @echo python3 not found: skipping rpctst.py )
 	@echo P A S S E D : $(patsubst %_EXEC,%,$@)

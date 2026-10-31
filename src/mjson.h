@@ -284,6 +284,7 @@ extern "C"
   jsonrpc_ctx_process(&jsonrpc_default_context, (buf), (len), (fn), (fnd), (ud))
 
 #define JSONRPC_ERROR_INVALID -32700    /* Invalid JSON was received */
+#define JSONRPC_ERROR_INVALID_REQUEST -32600 /* The JSON sent is not a valid Request object */
 #define JSONRPC_ERROR_NOT_FOUND -32601  /* The method does not exist */
 #define JSONRPC_ERROR_BAD_PARAMS -32602 /* Invalid params passed */
 #define JSONRPC_ERROR_INTERNAL -32603   /* Internal JSON-RPC error */

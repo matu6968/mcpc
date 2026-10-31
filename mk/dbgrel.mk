@@ -14,9 +14,12 @@ else ifneq ($(is_musl_gcc),not_found)
     found_musl = xxx
 endif
 
-ifneq (,$(is_musl))
+# NOTE -Werror is opt-in (WERROR=1): older compilers and the C11 fallbacks
+# still emit warnings (e.g. -Wpointer-sign for char8_t), and new compiler
+# versions add warnings that must not break a library build.
+ifneq (,$(found_musl))
   CFLAGS += -Wno-error
-else
+else ifdef WERROR
   CFLAGS += -Werror
 endif
 

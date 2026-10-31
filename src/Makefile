@@ -46,6 +46,7 @@ libmcpc_srcs += rsc.c
 libmcpc_srcs += prmpt.c
 libmcpc_srcs += server.c
 libmcpc_srcs += retbuf.c
+libmcpc_srcs += frame.c
 libmcpc_srcs += ucbr.c
 libmcpc_srcs += complt.c
 libmcpc_srcs += serlz.c

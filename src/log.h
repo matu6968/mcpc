@@ -39,16 +39,20 @@ extern LogLevel glv; // TODO: thread-safety
     do                                                                                                                 \
     {                                                                                                                  \
         char meta[100];                                                                                                \
-        sprintf(meta, "%s,%d", __TU__, __LINE__);                                                                      \
+        snprintf(meta, sizeof(meta), "%s,%d", __TU__, __LINE__);                                                   \
         lvlog(Debug, meta, stderr __VA_OPT__(, ) __VA_ARGS__);                                                         \
     } while (false)
 #define tuflog_d(...)                                                                                                  \
     do                                                                                                                 \
     {                                                                                                                  \
         FILE *logf = fopen("/tmp/mcpc.log", "a");                                                                      \
-        char meta[100];                                                                                                \
-        sprintf(meta, "%s,%d", __TU__, __LINE__);                                                                      \
-        lvlog(Debug, meta, logf __VA_OPT__(, ) __VA_ARGS__);                                                           \
+        if (logf != NULL)                                                                                              \
+        {                                                                                                              \
+            char meta[100];                                                                                            \
+            snprintf(meta, sizeof(meta), "%s,%d", __TU__, __LINE__);                                                   \
+            lvlog(Debug, meta, logf __VA_OPT__(, ) __VA_ARGS__);                                                       \
+            fclose(logf);                                                                                              \
+        }                                                                                                              \
     } while (false)
 #else
 #define tulog_d(...) ;

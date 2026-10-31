@@ -72,6 +72,40 @@ cb_calc (const mcpc_tool_t *tool, mcpc_ucbr_t *ucbr)
   mcpc_ucbr_toolcall_add_text_printf8 (ucbr, u8c1 ("%d"), res);
 }
 
+// answers with a text far larger than any fixed-size response buffer
+static void
+cb_bigtext (const mcpc_tool_t *tool, mcpc_ucbr_t *ucbr)
+{
+  char8_t chunk[4097];
+  memset (chunk, 'x', sizeof (chunk) - 1);
+  chunk[sizeof (chunk) - 1] = 0;
+  for (int i = 0; i < 5; i++)
+    mcpc_ucbr_toolcall_add_text_printf8 (ucbr, u8c1 ("%s"), chunk);
+}
+
+static void
+cb_nothing (const mcpc_tool_t *tool, mcpc_ucbr_t *ucbr)
+{
+  mcpc_ucbr_toolcall_add_text_printf8 (ucbr, u8c1 ("ok"));
+}
+
+static void
+add_test_tools (mcpc_server_t *server, int n_extra_tools)
+{
+  mcpc_tool_t *big = mcpc_tool_new2 (u8c1 ("bigtext"), u8c1 ("returns about 20k bytes of text"));
+  mcpc_tool_set_call_cb (big, &cb_bigtext);
+  assert (0 == mcpc_server_add_tool (server, big));
+
+  for (int i = 0; i < n_extra_tools; i++)
+    {
+      char8_t name[32];
+      snprintf ((char *) name, sizeof (name), "extra-tool-%03d", i);
+      mcpc_tool_t *t = mcpc_tool_new2 (name, u8c1 ("an extra tool that only exists to make tools/list large"));
+      mcpc_tool_set_call_cb (t, &cb_nothing);
+      assert (0 == mcpc_server_add_tool (server, t));
+    }
+}
+
 mcpc_tool_t *
 new_tool_calc ()
 {
@@ -111,7 +145,8 @@ int
 main_iostrm (int argc, const char *argv[])
 {
   u8_t in_src = 0;		// 1stdin 2file
-  char in_fpath[100];
+  char in_fpath[4096];
+  int n_extra_tools = 0;
 
   for (int i = 2; i < argc; i++)
     {
@@ -121,6 +156,10 @@ main_iostrm (int argc, const char *argv[])
 	nex_arg = (const char8_t *) argv[i + 1];
       if (nex_arg != nullptr)
 	{
+	  if (u8streq (curr_arg, u8c1 ("--extra-tools")))
+	    {
+	      n_extra_tools = atoi ((const char *) nex_arg);
+	    }
 	  if (u8streq (curr_arg, u8c1 ("-i")))
 	    {
 	      if (u8streq (nex_arg, u8c1 ("-")))
@@ -131,7 +170,8 @@ main_iostrm (int argc, const char *argv[])
 		{
 		  // TODO nonascii filename?
 		  /* memcpy (in_fpath, nex_arg, strlen (nex_arg)); */
-		  strcpy (in_fpath, (const char *) nex_arg);
+		  assert (strlen ((const char *) nex_arg) < sizeof (in_fpath));
+		  snprintf (in_fpath, sizeof (in_fpath), "%s", (const char *) nex_arg);
 		  in_src = 2;
 		}
 	    }
@@ -164,6 +204,7 @@ main_iostrm (int argc, const char *argv[])
 
   mcpc_tool_t *tool = new_tool_calc ();
   assert (0 == mcpc_server_add_tool (server, tool));
+  add_test_tools (server, n_extra_tools);
 
   mcpc_errcode_t ec = mcpc_server_start (server);
 

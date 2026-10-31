@@ -1187,14 +1187,12 @@ jsonrpc_return_errorv(struct jsonrpc_request* r,
                       const char* data_fmt,
                       va_list* ap)
 {
-  // relaxing id requirement
-  /* if (r->id_len == 0) */
-    /* return; */
+  // errors for requests without a usable id are reported with a null id (JSON-RPC 2.0, 5.1)
   mjson_printf(r->fn,
                r->fn_data,
-               "{\"id\":%.*s,\"error\":{\"code\":%d,\"message\":%Q",
-               r->id_len,
-               r->id,
+               "{\"jsonrpc\":\"2.0\",\"id\":%.*s,\"error\":{\"code\":%d,\"message\":%Q",
+               r->id_len > 0 ? r->id_len : 4,
+               r->id_len > 0 ? r->id : "null",
                code,
                message == NULL ? "" : message);
   if (data_fmt != NULL) {

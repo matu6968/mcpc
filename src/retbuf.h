@@ -27,24 +27,39 @@
 #include <mcpc/_c23_uchar.h>
 
 #include "ext_stdint.h"
+#include "mjson.h"
 
-
+// Growable output buffer. Every write reallocates on demand, so serialized
+// output is never truncated. A write that cannot be satisfied (allocation
+// failure or size cap exceeded) sets the error flag, see retbuf_is_ok.
 typedef struct retbuf
 {
-  const size_t cap;
-  char *const buf0;
-  size_t *len;
-} retbuf_t;
+  struct mjson_fixedbuf fb;
+  bool oom;
+} *retbuf_t;
 
-retbuf_t retbuf_new (size_t cap, size_t *len);
+// upper bound of a single buffer (mjson_fixedbuf uses int sizes)
+#define MCPC_RETBUF_MAXCAP (1024 * 1024 * 1024)
+
+// mjson print callback appending to a growable mjson_fixedbuf, keeps NUL terminator
+int mcpc_print_grow (const char *ptr, int len, void *fn_data);
+
+// release the storage owned by a mjson_fixedbuf filled by mcpc_print_grow
+void mcpc_print_grow_free (struct mjson_fixedbuf *fb);
+
+retbuf_t retbuf_new (size_t cap_hint);
 
 void retbuf_free (retbuf_t rtbf);
 
-u8_t rtbuf_printf_adv (retbuf_t rtbf, size_t advl, const char8_t * u8str, ...);
+const char *retbuf_data (const retbuf_t rtbf);
 
-u8_t rtbuf_printf (retbuf_t rtbf, const char8_t * u8str, ...);
+size_t retbuf_len (const retbuf_t rtbf);
+
+bool retbuf_is_ok (const retbuf_t rtbf);
 
 u8_t rtbuf_printf_mjfmt (retbuf_t rtbf, const char8_t * u8str, ...);
+
+u8_t rtbuf_vprintf_mjfmt (retbuf_t rtbf, const char8_t * fmt8, va_list * vargs);
 
 
 #endif
