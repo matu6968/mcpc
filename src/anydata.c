@@ -22,6 +22,7 @@
 #include "anydata.h"
 
 #include "ext_string.h"
+#include "mjson.h"
 
 #include <mcpc/errcode.h>
 #include "alloc.h"
@@ -124,6 +125,14 @@ mcpc_anydata_mbfree (mcpc_anydata_t *data)
       mcpc_anypool_free (data->chd_pool);
     }
 
+  if (data->extra != nullptr)
+    {
+      for (int i = 0; i < MCPC_X_COUNT; i++)
+	free (data->extra->s[i]);
+      free (data->extra);
+      data->extra = nullptr;
+    }
+
   if (mcpc_anytype_is_arrlike (data->data_typ))
     {
       free ((void *) data->data_arrlk);
@@ -171,6 +180,8 @@ mcpc_anydata_copy (mcpc_anydata_t *dest_data, const mcpc_anydata_t *src_data)
     }
   else if (mcpc_anytype_is_intlike (src_data->data_typ))
     dest_data->data_intlk = src_data->data_intlk;
+  else if (mcpc_anytype_is_dbllike (src_data->data_typ))
+    dest_data->data_dbl = src_data->data_dbl;
 
   if (src_data->chd_pool != nullptr)
     {
@@ -178,11 +189,104 @@ mcpc_anydata_copy (mcpc_anydata_t *dest_data, const mcpc_anydata_t *src_data)
       mcpc_anypool_copy (dest_data->chd_pool, src_data->chd_pool);
     }
 
+  if (src_data->extra != nullptr)
+    {
+      dest_data->extra = mcpc_calloc (sizeof (struct mcpc_anyextra));
+      for (int i = 0; i < MCPC_X_COUNT; i++)
+	{
+	  if (src_data->extra->s[i] == nullptr)
+	    continue;
+	  const size_t n = strlen (src_data->extra->s[i]);
+	  dest_data->extra->s[i] = mcpc_alloc (n + 1);
+	  memcpy (dest_data->extra->s[i], src_data->extra->s[i], n + 1);
+	}
+      dest_data->extra->cb = src_data->extra->cb;
+      dest_data->extra->cb2 = src_data->extra->cb2;
+      dest_data->extra->size = src_data->extra->size;
+      dest_data->extra->has_size = src_data->extra->has_size;
+    }
+
   dest_data->data_typ = src_data->data_typ;
   dest_data->data_len = src_data->data_len;
   dest_data->flags = src_data->flags;
+  dest_data->ckind = src_data->ckind;
   dest_data->data_mime = src_data->data_mime;
 
+}
+
+/* = = = = = = = = = = = = = = = = extras = = = = = = = = = = = = = = = = */
+
+struct mcpc_anyextra *
+mcpc_anydata_xensure (mcpc_anydata_t *data)
+{
+  if (data->extra == nullptr)
+    data->extra = mcpc_calloc (sizeof (struct mcpc_anyextra));
+  return data->extra;
+}
+
+mcpc_errcode_t
+mcpc_anydata_xset (mcpc_anydata_t *data, mcpc_xslot_t slot, const char *s, size_t len, int expect_tok)
+{
+  bug_if_nullptr (data);
+  mcpc_assert ((int) slot >= 0 && slot < MCPC_X_COUNT, MCPC_EC_BUG);
+
+  char *cp = nullptr;
+  if (s != nullptr)
+    {
+      if (expect_tok != 0)
+	{
+	  const char *tok = nullptr;
+	  int toklen = 0;
+	  if (len > (size_t) INT32_MAX || mjson_find (s, (int) len, "$", &tok, &toklen) != expect_tok ||
+	      (size_t) toklen != len)
+	    return MCPC_EC_JSON_FIELD_INVALID;
+	}
+      cp = mcpc_alloc (len + 1);
+      if (cp == nullptr)
+	return MCPC_EC_BUG;
+      memcpy (cp, s, len);
+      cp[len] = 0;
+    }
+
+  struct mcpc_anyextra *x = mcpc_anydata_xensure (data);
+  free (x->s[slot]);
+  x->s[slot] = cp;
+  return MCPC_EC_0;
+}
+
+const char *
+mcpc_anydata_xget (const mcpc_anydata_t *data, mcpc_xslot_t slot)
+{
+  if (data == nullptr || data->extra == nullptr)
+    return nullptr;
+  return data->extra->s[slot];
+}
+
+MCPC_API mcpc_errcode_t
+mcpc_anydata_set_title (mcpc_anydata_t *data, const char8_t *titlent)
+{
+  return mcpc_anydata_xset (data, MCPC_X_TITLE, (const char *) titlent, titlent ? u8strlen (titlent) : 0, 0);
+}
+
+MCPC_API mcpc_errcode_t
+mcpc_anydata_set_icons_json (mcpc_anydata_t *data, const char8_t *json_array_nt)
+{
+  return mcpc_anydata_xset (data, MCPC_X_ICONS, (const char *) json_array_nt,
+			    json_array_nt ? u8strlen (json_array_nt) : 0, MJSON_TOK_ARRAY);
+}
+
+MCPC_API mcpc_errcode_t
+mcpc_anydata_set_annotations_json (mcpc_anydata_t *data, const char8_t *json_object_nt)
+{
+  return mcpc_anydata_xset (data, MCPC_X_ANNOT, (const char *) json_object_nt,
+			    json_object_nt ? u8strlen (json_object_nt) : 0, MJSON_TOK_OBJECT);
+}
+
+MCPC_API mcpc_errcode_t
+mcpc_anydata_set_meta_json (mcpc_anydata_t *data, const char8_t *json_object_nt)
+{
+  return mcpc_anydata_xset (data, MCPC_X_META, (const char *) json_object_nt,
+			    json_object_nt ? u8strlen (json_object_nt) : 0, MJSON_TOK_OBJECT);
 }
 
 void
@@ -372,7 +476,7 @@ mcpc_anydata_set_arrlk (mcpc_anydata_t *anydata, mcpc_anytype_t typ, const void 
     nbytes = arr_len * sizeof (u32_t);
   else if (typ == MCPC_I64S || typ == MCPC_U64S)
     nbytes = arr_len * sizeof (u64_t);
-  else if (typ == MCPC_U8STR)
+  else if (typ == MCPC_U8STR || typ == MCPC_JSON)
     nbytes = arr_len * sizeof (char8_t);
   else
     return MCPC_EC_BUG;
@@ -415,29 +519,43 @@ mcpc_anydata_get_arrlk (const mcpc_anydata_t *anydata, mcpc_anytype_t typ, void 
     nb_el = sizeof (u32_t);
   else if (typ == MCPC_I64S || typ == MCPC_U64S)
     nb_el = sizeof (u64_t);
-  else if (typ == MCPC_U8STR)
+  else if (typ == MCPC_U8STR || typ == MCPC_JSON)
     nb_el = sizeof (char8_t);
   else
     return MCPC_EC_BUG;
 
+  // Text always ends up NUL-terminated, even when it has to be cut to fit: a caller that ignores the
+  // return code and prints the buffer must not read past it. *ret_len is the number of bytes copied.
+  const bool is_text = typ == MCPC_U8STR || typ == MCPC_JSON;
   size_t cplen = anydata->data_len;
-  if (cplen > ret_cap)
-    cplen = ret_cap;
+  bool truncated = false;
+  if (is_text)
+    {
+      if (cplen >= ret_cap)
+	{
+	  cplen = ret_cap - 1;
+	  truncated = true;
+	}
+    }
+  else if (cplen > ret_cap)
+    {
+      cplen = ret_cap;
+      truncated = true;
+    }
 
-  memcpy (ret, anydata->data_arrlk, cplen * nb_el);
+  if (cplen > 0)
+    memcpy (ret, anydata->data_arrlk, cplen * nb_el);
   if (ret_len != nullptr)
     *ret_len = cplen;
 
-  if (ret_cap > cplen)
+  if (is_text)
     {
-      char8_t *ret_typed = ret;
-      ret_typed[cplen] = 0;
-      return MCPC_EC_0;
+      ((char8_t *) ret)[cplen] = 0;
+      return truncated ? MCPC_EC_BUFCAP : MCPC_EC_0;
     }
-  else
-    {
-      return MCPC_EC_BUFCAP;
-    }
+
+  // arrays of numbers have no terminator
+  return truncated ? MCPC_EC_BUFCAP : MCPC_EC_0;
 }
 
 mcpc_errcode_t
@@ -546,6 +664,64 @@ mcpc_errcode_t
 mcpc_anydata_get_func (const mcpc_anydata_t *anydata, void *ret)
 {
   return mcpc_anydata_get_intlk (anydata, MCPC_FUNC, ret);
+}
+
+mcpc_errcode_t
+mcpc_anydata_set_bool (mcpc_anydata_t *anydata, bool val)
+{
+  bug_if_nullptr (anydata);
+  if (mcpc_anytype_is_arrlike (anydata->data_typ))
+    mcpc_anydata_release_data (anydata);
+  anydata->data_intlk = val ? 1 : 0;
+  anydata->data_typ = MCPC_BOOL;
+  anydata->data_len = 1;
+  return MCPC_EC_0;
+}
+
+mcpc_errcode_t
+mcpc_anydata_get_bool (const mcpc_anydata_t *anydata, bool *ret)
+{
+  bug_if_nullptr (anydata);
+  bug_if_nullptr (ret);
+  if (anydata->data_typ != MCPC_BOOL)
+    return MCPC_EC_ANYDATA_NOTFOUND;
+  *ret = anydata->data_intlk != 0;
+  return MCPC_EC_0;
+}
+
+mcpc_errcode_t
+mcpc_anydata_set_f64 (mcpc_anydata_t *anydata, double val)
+{
+  bug_if_nullptr (anydata);
+  if (mcpc_anytype_is_arrlike (anydata->data_typ))
+    mcpc_anydata_release_data (anydata);
+  anydata->data_dbl = val;
+  anydata->data_typ = MCPC_F64;
+  anydata->data_len = 1;
+  return MCPC_EC_0;
+}
+
+mcpc_errcode_t
+mcpc_anydata_get_f64 (const mcpc_anydata_t *anydata, double *ret)
+{
+  bug_if_nullptr (anydata);
+  bug_if_nullptr (ret);
+  if (anydata->data_typ != MCPC_F64)
+    return MCPC_EC_ANYDATA_NOTFOUND;
+  *ret = anydata->data_dbl;
+  return MCPC_EC_0;
+}
+
+mcpc_errcode_t
+mcpc_anydata_set_json (mcpc_anydata_t *anydata, const char8_t *json, size_t json_len)
+{
+  return mcpc_anydata_set_arrlk (anydata, MCPC_JSON, json, json_len);
+}
+
+mcpc_errcode_t
+mcpc_anydata_get_json (const mcpc_anydata_t *anydata, char8_t *ret, size_t ret_cap, size_t *ret_len)
+{
+  return mcpc_anydata_get_arrlk (anydata, MCPC_JSON, ret, ret_cap, ret_len);
 }
 
 mcpc_errcode_t
@@ -798,10 +974,10 @@ mcpc_anypool_getbymeta1 (const mcpc_anypool_t *anypool, const char8_t *meta1, si
   for (size_t i = 0; i < anypool->len; i++)	// TODO: ckdadd
     {
       const mcpc_anydata_t *cur_data = anypool->head + i;
-      if (cur_data->meta1_len > 0)
+      // the names must be the same length too, or a prefix of a name would find it
+      if (cur_data->meta1_len > 0 && (size_t) cur_data->meta1_len == meta1_len)
 	{
-	  size_t cmpsz = min_size (meta1_len, (size_t) cur_data->meta1_len);
-	  if (0 == u8strncmp (cur_data->meta1, meta1, cmpsz))
+	  if (0 == u8strncmp (cur_data->meta1, meta1, meta1_len))
 	    return cur_data;
 	}
     }

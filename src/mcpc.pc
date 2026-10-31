@@ -7,4 +7,5 @@ Description: A library for Model Context Protocol(MCP)
 URL: https://github.com/micl2e2/mcpc
 Version: 0.1.0
 Libs: -L${libdir} -lmcpc
+Libs.private: -pthread
 Cflags: -I${includedir}

@@ -20,6 +20,7 @@
 // CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 #include "tool.h"
+#include "mjson.h"
 
 #include "ext_string.h"
 
@@ -448,6 +449,103 @@ mcpc_tool_get_tpropval_u8str (const mcpc_tool_t *tool, const char8_t *tprop_name
     return MCPC_EC_TOOLPROP_NOTFOUND;
 
   return mcpc_anydata_get_u8str (chd, ret, ret_cap, ret_len);
+}
+
+MCPC_API void
+mcpc_toolprop_set_required (mcpc_toolprop_t *toolprop, bool required)
+{
+  bug_if_nullptr (toolprop);
+  if (required)
+    toolprop->flags |= ANYDATA_FL_REQUIRED;
+  else
+    toolprop->flags &= ~ANYDATA_FL_REQUIRED;
+}
+
+MCPC_API bool
+mcpc_tool_has_tpropval (const mcpc_tool_t *tool, const char8_t *tprop_nament)
+{
+  const mcpc_toolprop_t *chd = mcpc_tool_getbynament_toolprop (tool, tprop_nament);
+  return chd != nullptr && (chd->flags & ANYDATA_FL_PROVIDED) != 0;
+}
+
+MCPC_API mcpc_errcode_t
+mcpc_tool_get_tpropval_bool (const mcpc_tool_t *tool, const char8_t *tprop_nament, bool *ret)
+{
+  const mcpc_toolprop_t *chd = mcpc_tool_getbynament_toolprop (tool, tprop_nament);
+  if (chd == nullptr)
+    return MCPC_EC_TOOLPROP_NOTFOUND;
+  return mcpc_anydata_get_bool (chd, ret);
+}
+
+MCPC_API mcpc_errcode_t
+mcpc_tool_get_tpropval_f64 (const mcpc_tool_t *tool, const char8_t *tprop_nament, double *ret)
+{
+  const mcpc_toolprop_t *chd = mcpc_tool_getbynament_toolprop (tool, tprop_nament);
+  if (chd == nullptr)
+    return MCPC_EC_TOOLPROP_NOTFOUND;
+  return mcpc_anydata_get_f64 (chd, ret);
+}
+
+MCPC_API mcpc_errcode_t
+mcpc_tool_get_tpropval_json (const mcpc_tool_t *tool, const char8_t *tprop_nament, char8_t *ret, size_t ret_cap,
+			     size_t *ret_len)
+{
+  const mcpc_toolprop_t *chd = mcpc_tool_getbynament_toolprop (tool, tprop_nament);
+  if (chd == nullptr)
+    return MCPC_EC_TOOLPROP_NOTFOUND;
+  return mcpc_anydata_get_json (chd, ret, ret_cap, ret_len);
+}
+
+MCPC_API mcpc_errcode_t
+mcpc_tool_set_call_cb2 (mcpc_tool_t *tool, mcpc_tcallcb2_t cb)
+{
+  bug_if_nullptr (tool);
+  mcpc_anydata_xensure (tool)->cb = (void (*) (void)) cb;
+  return MCPC_EC_0;
+}
+
+MCPC_API mcpc_errcode_t
+mcpc_tool_set_input_schema_json (mcpc_tool_t *tool, const char8_t *json_object_nt)
+{
+  return mcpc_anydata_xset (tool, MCPC_X_INSCHEMA, (const char *) json_object_nt,
+			    json_object_nt ? strlen ((const char *) json_object_nt) : 0, MJSON_TOK_OBJECT);
+}
+
+MCPC_API mcpc_errcode_t
+mcpc_tool_set_output_schema_json (mcpc_tool_t *tool, const char8_t *json_object_nt)
+{
+  return mcpc_anydata_xset (tool, MCPC_X_OUTSCHEMA, (const char *) json_object_nt,
+			    json_object_nt ? strlen ((const char *) json_object_nt) : 0, MJSON_TOK_OBJECT);
+}
+
+MCPC_API mcpc_errcode_t
+mcpc_tool_set_hints (mcpc_tool_t *tool, int read_only, int destructive, int idempotent, int open_world)
+{
+  char buf[160];
+  size_t n = 0;
+  const struct
+  {
+    const char *key;
+    int val;
+  } h[] = {
+    { "readOnlyHint", read_only }, { "destructiveHint", destructive },
+    { "idempotentHint", idempotent }, { "openWorldHint", open_world },
+  };
+
+  buf[n++] = '{';
+  bool first = true;
+  for (size_t i = 0; i < sizeof (h) / sizeof (h[0]); i++)
+    {
+      if (h[i].val < 0)
+	continue;
+      n += (size_t) snprintf (buf + n, sizeof (buf) - n, "%s\"%s\":%s", first ? "" : ",", h[i].key,
+			      h[i].val ? "true" : "false");
+      first = false;
+    }
+  buf[n++] = '}';
+  buf[n] = 0;
+
+  return mcpc_anydata_xset (tool, MCPC_X_ANNOT, first ? nullptr : buf, n, MJSON_TOK_OBJECT);
 }
 
 const mcpc_toolproppool_t *

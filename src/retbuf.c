@@ -81,6 +81,9 @@ retbuf_new (size_t cap_hint)
   x->fb.size = 0;
   x->fb.len = 0;
   x->oom = false;
+  x->feat = 0;
+  x->ttl_ms = 0;
+  x->cache_public = false;
 
   // reserve the hint up front, an empty buffer is still a valid NUL-terminated string
   if (cap_hint > 0 && cap_hint < MCPC_RETBUF_MAXCAP)

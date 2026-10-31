@@ -25,6 +25,9 @@
 #include <stdint.h>
 
 #include "_c23_keywords.h"
+#include "_c23_uchar.h"
+#include "errcode.h"
+#include "visb.h"
 
 enum mcpc_anytype
 {
@@ -47,6 +50,9 @@ enum mcpc_anytype
   MCPC_I64S,
   MCPC_U64S,
   MCPC_FUNC,
+  MCPC_F64,
+  MCPC_BOOL,
+  MCPC_JSON,			// raw JSON text, e.g. an object or array argument
 };
 typedef enum mcpc_anytype mcpc_anytype_t;
 
@@ -81,21 +87,47 @@ static inline bool
 mcpc_anytype_is_intlike (mcpc_anytype_t typ)
 {
   if (typ == MCPC_I8 || typ == MCPC_I16 || typ == MCPC_I32 || typ == MCPC_I64 || typ == MCPC_U8 || typ == MCPC_U16
-      || typ == MCPC_U32 || typ == MCPC_U64 || typ == MCPC_FUNC)
+      || typ == MCPC_U32 || typ == MCPC_U64 || typ == MCPC_FUNC || typ == MCPC_BOOL)
     return true;
 
   return false;
 }
 
 static inline bool
+mcpc_anytype_is_dbllike (mcpc_anytype_t typ)
+{
+  return typ == MCPC_F64;
+}
+
+static inline bool
 mcpc_anytype_is_arrlike (mcpc_anytype_t typ)
 {
-  if (typ == MCPC_U8STR || typ == MCPC_I8S || typ == MCPC_I16S || typ == MCPC_I32S || typ == MCPC_I64S
+  if (typ == MCPC_U8STR || typ == MCPC_JSON || typ == MCPC_I8S || typ == MCPC_I16S || typ == MCPC_I32S || typ == MCPC_I64S
       || typ == MCPC_U8S || typ == MCPC_U16S || typ == MCPC_U32S || typ == MCPC_U64S)
     return true;
 
   return false;
 }
 
+
+// ---------------------------- metadata ----------------------------
+//
+// Optional descriptive fields shared by tools, prompts, resources and resource
+// templates (they are all mcpc_anydata_t). Every setter copies its input, NULL
+// clears the field, and the *_json setters reject text that is not valid JSON of
+// the expected kind. Fields a negotiated protocol revision does not know about
+// are left out of that revision's responses.
+
+// human readable display name (2025-06-18+)
+MCPC_API mcpc_errcode_t mcpc_anydata_set_title (mcpc_anydata_t *data, const char8_t *titlent);
+
+// JSON array of {"src","mimeType","sizes"} objects (2025-11-25+)
+MCPC_API mcpc_errcode_t mcpc_anydata_set_icons_json (mcpc_anydata_t *data, const char8_t *json_array_nt);
+
+// JSON object with audience/priority/lastModified
+MCPC_API mcpc_errcode_t mcpc_anydata_set_annotations_json (mcpc_anydata_t *data, const char8_t *json_object_nt);
+
+// JSON object returned as _meta (2025-06-18+)
+MCPC_API mcpc_errcode_t mcpc_anydata_set_meta_json (mcpc_anydata_t *data, const char8_t *json_object_nt);
 
 #endif

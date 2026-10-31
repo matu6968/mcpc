@@ -63,10 +63,16 @@ mcpc_prmptarg_free (mcpc_prmptarg_t *prmptarg)
   mcpc_anydata_free ((mcpc_anydata_t *) prmptarg);
 }
 
-bool
+MCPC_API bool
 mcpc_prmptarg_is_required (const mcpc_prmptarg_t *prmptarg)
 {
   return prmptarg->flags & ANYDATA_FL_REQUIRED;
+}
+
+MCPC_API bool
+mcpc_prmptarg_is_provided (const mcpc_prmptarg_t *prmptarg)
+{
+  return prmptarg->flags & ANYDATA_FL_PROVIDED;
 }
 
 mcpc_errcode_t
@@ -90,7 +96,7 @@ mcpc_prmptarg_get_data_type (const mcpc_prmptarg_t *prmptarg, mcpc_anytype_t *re
   return MCPC_EC_0;
 }
 
-mcpc_errcode_t
+MCPC_API mcpc_errcode_t
 mcpc_prmptarg_set_required (mcpc_prmptarg_t *prmptarg, bool fl)
 {
   bug_if_nullptr (prmptarg);
@@ -375,4 +381,12 @@ mcpc_prmptarg_get_next_prmptarghint (const mcpc_prmptarg_t *prmptarg)
   idx += 1;
 
   return ret;
+}
+
+MCPC_API mcpc_errcode_t
+mcpc_prmpt_set_callcb2 (mcpc_prmpt_t *prmpt, mcpc_prmpt_callcb2_t cb)
+{
+  bug_if_nullptr (prmpt);
+  mcpc_anydata_xensure (prmpt)->cb2 = (void (*) (void)) cb;
+  return MCPC_EC_0;
 }

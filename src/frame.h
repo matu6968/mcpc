@@ -40,6 +40,7 @@ typedef struct mcpc_framer
   bool in_str;
   bool esc;
   bool overflow;		// current object exceeded max, bytes are dropped until it ends
+  bool line_mode;		// a newline inside an unfinished object ends it (stdio: messages never contain one)
 } mcpc_framer_t;
 
 enum mcpc_frame_stat
@@ -47,6 +48,7 @@ enum mcpc_frame_stat
   MCPC_FRAME_MORE = 0,		// need more bytes
   MCPC_FRAME_READY,		// frame.buf[0..len) holds one NUL-terminated object
   MCPC_FRAME_TOOBIG,		// an object larger than max was dropped
+  MCPC_FRAME_BROKEN,		// line mode: a newline arrived inside an unfinished object, it was dropped
   MCPC_FRAME_NOMEM,
 };
 typedef enum mcpc_frame_stat mcpc_frame_stat_t;
@@ -54,6 +56,11 @@ typedef enum mcpc_frame_stat mcpc_frame_stat_t;
 #define MCPC_FRAME_DEFAULT_MAX (16u * 1024u * 1024u)
 
 void mcpc_framer_init (mcpc_framer_t * f, size_t max);
+
+// Like init for a newline delimited stream (the stdio transport). Objects may still follow each other
+// without a newline in between, but a newline can no longer hide inside one: a garbled message cannot
+// swallow the ones after it.
+void mcpc_framer_init_lines (mcpc_framer_t * f, size_t max);
 
 void mcpc_framer_free (mcpc_framer_t * f);
 

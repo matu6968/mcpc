@@ -29,6 +29,7 @@
 #include "anydata.h"
 #include "errcode.h"
 #include "ext_string.h"
+#include "mjson.h"
 
 /* = = = = = = = = = = = = = = = = ucbrchd = = = = = = = = = = = = = = = = */
 
@@ -196,23 +197,12 @@ mcpc_ucbr_get_serlz_lenhint (const mcpc_ucbr_t *ucbr)
   bug_if_nullptr (ucbr);
   size_t ret = 0;
 
-  const mcpc_ucbrchd_t *cur_chd = nullptr;
-  while ((cur_chd = mcpc_ucbr_get_next (ucbr)))
-    {
-      ret += cur_chd->data_len;
-    }
+  for (size_t i = 0; i < ucbr->len; i++)
+    ret += ucbr->head[i].data_len;
+  ret += ret / 3;		// base64 expansion of binary blocks
 
-  const size_t tshold = 1024;
-  size_t extra = 0;
-
-  if (ret * 1 / 2 < tshold)
-    extra = tshold;
-  else
-    extra = (ret * 1 / 2); // TODO find a optimal one
-
-  ret += extra;
-
-  return ret;
+  // the buffer grows on demand, this only saves reallocations
+  return ret + 1024;
 }
 
 void
@@ -241,6 +231,233 @@ mcpc_ucbr_toolcall_add_text_printf8 (mcpc_ucbr_t *ucbr, const char8_t *fmt,
   mcpc_ucbr_toolcallres_add_text_vprintf8 (ucbr, fmt, &vargs);
 
   va_end (vargs);
+}
+
+/* = = = = = = = = = = = = = = = = rich results = = = = = = = = = = = = = = = = */
+
+// who a result entry belongs to: a tool result, a prompt message of either role, or neither (resources/read)
+enum chd_owner
+{
+  CHD_NONE = 0,
+  CHD_TOOL,
+  CHD_PRMPT_USER,
+  CHD_PRMPT_ASSIST,
+};
+
+static mcpc_ucbrchd_t *
+_chd_new (mcpc_ckind_t kind, int owner)
+{
+  mcpc_anydata_t *d = mcpc_anydata_new ();
+  d->ckind = (u8_t) kind;
+  if (owner == CHD_TOOL)
+    d->flags |= ANYDATA_FL_USRCBRES_TOOLCALL;
+  else if (owner == CHD_PRMPT_USER || owner == CHD_PRMPT_ASSIST)
+    {
+      d->flags |= ANYDATA_FL_USRCBRES_PRMPTCALL;
+      if (owner == CHD_PRMPT_ASSIST)
+	d->flags |= ANYDATA_FL_USRCBRES_PRMPTCALL_ASSIST;
+    }
+  return d;
+}
+
+// which pool flag goes with an owner
+static void
+_flag_pool (mcpc_ucbr_t *ucbr, int owner)
+{
+  if (owner == CHD_TOOL)
+    ucbr->flags |= ANYPOOL_FL_USRCBRES_TOOLCALL;
+  else if (owner == CHD_PRMPT_USER || owner == CHD_PRMPT_ASSIST)
+    ucbr->flags |= ANYPOOL_FL_USRCBRES_PRMPTCALL;
+}
+
+static void
+_chd_set_bytes (mcpc_anydata_t *d, const void *bytes, size_t len)
+{
+  if (len > 0 && bytes != nullptr)
+    mcpc_anydata_set_u8s (d, bytes, len);
+  else
+    d->data_typ = MCPC_U8S;	// empty payload, nothing to allocate
+}
+
+static void
+_chd_set_str (mcpc_anydata_t *d, mcpc_xslot_t slot, const char8_t *s)
+{
+  if (s != nullptr && s[0] != 0)
+    mcpc_anydata_xset (d, slot, (const char *) s, strlen ((const char *) s), 0);
+}
+
+static void
+_add_media (mcpc_ucbr_t *ucbr, int owner, mcpc_ckind_t kind, const void *bytes, size_t len, const char8_t *mime_nt)
+{
+  bug_if_nullptr (ucbr);
+  _flag_pool (ucbr, owner);
+  mcpc_ucbrchd_t *d = _chd_new (kind, owner);
+  _chd_set_bytes (d, bytes, len);
+  _chd_set_str (d, MCPC_X_MIME, mime_nt != nullptr && mime_nt[0] ? mime_nt : u8c1 ("application/octet-stream"));
+  mcpc_ucbr_addfre (ucbr, d);
+}
+
+static void
+_add_link (mcpc_ucbr_t *ucbr, int owner, const char8_t *uri_nt, const char8_t *name_nt, const char8_t *desc_nt, const char8_t *mime_nt)
+{
+  bug_if_nullptr (ucbr);
+  bug_if_nullptr (uri_nt);
+  _flag_pool (ucbr, owner);
+  mcpc_ucbrchd_t *d = _chd_new (MCPC_CK_RESLINK, owner);
+  if (name_nt != nullptr && strlen ((const char *) name_nt) <= UINT8_MAX)
+    mcpc_anydata_set_meta1nt (d, name_nt);
+  _chd_set_str (d, MCPC_X_URI, uri_nt);
+  _chd_set_str (d, MCPC_X_DESC, desc_nt);
+  _chd_set_str (d, MCPC_X_MIME, mime_nt);
+  mcpc_ucbr_addfre (ucbr, d);
+}
+
+static void
+_add_embedded_text (mcpc_ucbr_t *ucbr, int owner, const char8_t *uri_nt, const char8_t *mime_nt, const char8_t *text_nt)
+{
+  bug_if_nullptr (ucbr);
+  _flag_pool (ucbr, owner);
+  mcpc_ucbrchd_t *d = _chd_new (MCPC_CK_RES_TEXT, owner);
+  mcpc_anydata_set_u8str (d, text_nt != nullptr ? text_nt : u8c1 (""), text_nt != nullptr ? strlen ((const char *) text_nt) : 0);
+  _chd_set_str (d, MCPC_X_URI, uri_nt);
+  _chd_set_str (d, MCPC_X_MIME, mime_nt);
+  mcpc_ucbr_addfre (ucbr, d);
+}
+
+static void
+_add_embedded_blob (mcpc_ucbr_t *ucbr, int owner, const char8_t *uri_nt, const char8_t *mime_nt, const void *bytes, size_t len)
+{
+  bug_if_nullptr (ucbr);
+  _flag_pool (ucbr, owner);
+  mcpc_ucbrchd_t *d = _chd_new (MCPC_CK_RES_BLOB, owner);
+  _chd_set_bytes (d, bytes, len);
+  _chd_set_str (d, MCPC_X_URI, uri_nt);
+  _chd_set_str (d, MCPC_X_MIME, mime_nt);
+  mcpc_ucbr_addfre (ucbr, d);
+}
+
+MCPC_API void
+mcpc_ucbr_toolcall_add_image (mcpc_ucbr_t *ucbr, const void *bytes, size_t len, const char8_t *mime_nt)
+{
+  _add_media (ucbr, CHD_TOOL, MCPC_CK_IMAGE, bytes, len, mime_nt);
+}
+
+MCPC_API void
+mcpc_ucbr_toolcall_add_audio (mcpc_ucbr_t *ucbr, const void *bytes, size_t len, const char8_t *mime_nt)
+{
+  _add_media (ucbr, CHD_TOOL, MCPC_CK_AUDIO, bytes, len, mime_nt);
+}
+
+MCPC_API void
+mcpc_ucbr_toolcall_add_resource_link (mcpc_ucbr_t *ucbr, const char8_t *uri_nt, const char8_t *name_nt, const char8_t *desc_nt,
+				      const char8_t *mime_nt)
+{
+  _add_link (ucbr, CHD_TOOL, uri_nt, name_nt, desc_nt, mime_nt);
+}
+
+MCPC_API void
+mcpc_ucbr_toolcall_add_embedded_text (mcpc_ucbr_t *ucbr, const char8_t *uri_nt, const char8_t *mime_nt, const char8_t *text_nt)
+{
+  _add_embedded_text (ucbr, CHD_TOOL, uri_nt, mime_nt, text_nt);
+}
+
+MCPC_API void
+mcpc_ucbr_toolcall_add_embedded_blob (mcpc_ucbr_t *ucbr, const char8_t *uri_nt, const char8_t *mime_nt, const void *bytes, size_t len)
+{
+  _add_embedded_blob (ucbr, CHD_TOOL, uri_nt, mime_nt, bytes, len);
+}
+
+#define PRMPT_VARIANTS(NAME, ROLE_SUFFIX, OWNER)                                                                                   \
+MCPC_API void mcpc_ucbr_prmptget_add_##ROLE_SUFFIX##_image (mcpc_ucbr_t *u, const void *b, size_t n, const char8_t *m)              \
+{ _add_media (u, OWNER, MCPC_CK_IMAGE, b, n, m); }                                                                                \
+MCPC_API void mcpc_ucbr_prmptget_add_##ROLE_SUFFIX##_audio (mcpc_ucbr_t *u, const void *b, size_t n, const char8_t *m)              \
+{ _add_media (u, OWNER, MCPC_CK_AUDIO, b, n, m); }                                                                                \
+MCPC_API void mcpc_ucbr_prmptget_add_##ROLE_SUFFIX##_embedded_text (mcpc_ucbr_t *u, const char8_t *uri, const char8_t *m, const char8_t *t) \
+{ _add_embedded_text (u, OWNER, uri, m, t); }                                                                                     \
+MCPC_API void mcpc_ucbr_prmptget_add_##ROLE_SUFFIX##_embedded_blob (mcpc_ucbr_t *u, const char8_t *uri, const char8_t *m, const void *b, size_t n) \
+{ _add_embedded_blob (u, OWNER, uri, m, b, n); }                                                                                  \
+MCPC_API void mcpc_ucbr_prmptget_add_##ROLE_SUFFIX##_resource_link (mcpc_ucbr_t *u, const char8_t *uri, const char8_t *name, const char8_t *d, const char8_t *m) \
+{ _add_link (u, OWNER, uri, name, d, m); }
+
+PRMPT_VARIANTS (user, user, CHD_PRMPT_USER)
+PRMPT_VARIANTS (assist, assist, CHD_PRMPT_ASSIST)
+
+// JSON text must be one complete value, whitespace around it is fine
+static bool
+_is_json_value (const char8_t *s, int want_tok)
+{
+  const char *tok = nullptr;
+  int toklen = 0;
+  const int n = (int) strlen ((const char *) s);
+  const int tt = mjson_find ((const char *) s, n, "$", &tok, &toklen);
+  if (tt == MJSON_TOK_INVALID || (want_tok != 0 && tt != want_tok))
+    return false;
+  // nothing but whitespace may follow the value
+  for (const char *p = tok + toklen; p < (const char *) s + n; p++)
+    if (*p != ' ' && *p != '\t' && *p != '\r' && *p != '\n')
+      return false;
+  return true;
+}
+
+MCPC_API mcpc_errcode_t
+mcpc_ucbr_toolcall_set_structured_json (mcpc_ucbr_t *ucbr, const char8_t *json_nt)
+{
+  bug_if_nullptr (ucbr);
+  bug_if_nullptr (json_nt);
+  if (!_is_json_value (json_nt, 0))
+    return MCPC_EC_JSON_FIELD_INVALID;
+
+  ucbr->flags |= ANYPOOL_FL_USRCBRES_TOOLCALL;
+  mcpc_ucbrchd_t *d = _chd_new (MCPC_CK_STRUCTURED, CHD_TOOL);
+  mcpc_anydata_set_json (d, json_nt, strlen ((const char *) json_nt));
+  mcpc_ucbr_addfre (ucbr, d);
+
+  // clients that predate structured output read the same data from a text block
+  mcpc_ucbr_toolcall_add_text_printf8 (ucbr, u8c1 ("%s"), json_nt);
+  return MCPC_EC_0;
+}
+
+MCPC_API mcpc_errcode_t
+mcpc_ucbr_set_meta_json (mcpc_ucbr_t *ucbr, const char8_t *json_object_nt)
+{
+  bug_if_nullptr (ucbr);
+  bug_if_nullptr (json_object_nt);
+  if (!_is_json_value (json_object_nt, MJSON_TOK_OBJECT))
+    return MCPC_EC_JSON_FIELD_INVALID;
+
+  mcpc_ucbrchd_t *d = _chd_new (MCPC_CK_RESMETA, CHD_NONE);
+  mcpc_anydata_set_json (d, json_object_nt, strlen ((const char *) json_object_nt));
+  mcpc_ucbr_addfre (ucbr, d);
+  return MCPC_EC_0;
+}
+
+MCPC_API void
+mcpc_ucbr_rscread_add_text (mcpc_ucbr_t *ucbr, const char8_t *uri_nt, const char8_t *mime_nt, const char8_t *fmt, ...)
+{
+  bug_if_nullptr (ucbr);
+  bug_if_nullptr (fmt);
+  va_list vargs;
+  va_start (vargs, fmt);
+  mcpc_ucbrchd_t *d = mcpc_ucbrchd_new_vprintf8 (fmt, &vargs);
+  va_end (vargs);
+  if (d == nullptr)
+    return;
+  d->ckind = (u8_t) MCPC_CK_RES_TEXT;
+  _chd_set_str (d, MCPC_X_URI, uri_nt);
+  _chd_set_str (d, MCPC_X_MIME, mime_nt);
+  mcpc_ucbr_addfre (ucbr, d);
+}
+
+MCPC_API void
+mcpc_ucbr_rscread_add_blob (mcpc_ucbr_t *ucbr, const char8_t *uri_nt, const char8_t *mime_nt, const void *bytes,
+			    size_t len)
+{
+  bug_if_nullptr (ucbr);
+  mcpc_ucbrchd_t *d = _chd_new (MCPC_CK_RES_BLOB, CHD_NONE);
+  _chd_set_bytes (d, bytes, len);
+  _chd_set_str (d, MCPC_X_URI, uri_nt);
+  _chd_set_str (d, MCPC_X_MIME, mime_nt);
+  mcpc_ucbr_addfre (ucbr, d);
 }
 
 MCPC_API void

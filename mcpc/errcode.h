@@ -44,6 +44,13 @@ enum mcpc_errcode
   MCPC_EC_ANYDATA_LONGNAME,
   MCPC_EC_PRMPTARG_NOTFOUND,
   MCPC_EC_JSON_FIELD_INVALID,
+  MCPC_EC_CAPA_OFF,		// the capability this needs is not enabled on the server
+  MCPC_EC_CLIENT_NOCAPA,	// the client did not declare the capability this needs
+  MCPC_EC_CLIENT_ERR,		// the client answered a request of ours with an error
+  MCPC_EC_CONN_CLOSED,		// the client went away while we waited for it
+  MCPC_EC_CANCELLED,		// the client cancelled the request being served
+  MCPC_EC_UNSUPPORTED,		// the negotiated protocol revision does not have this feature
+  MCPC_EC_NEEDS_INPUT,		// the client must answer first: return from the callback, it is run again with the answers
 };
 typedef enum mcpc_errcode mcpc_errcode_t;
 

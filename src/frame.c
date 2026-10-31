@@ -19,7 +19,6 @@
 // IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 // CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-#include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -33,6 +32,13 @@ mcpc_framer_init (mcpc_framer_t *f, size_t max)
 {
   memset (f, 0, sizeof (*f));
   f->max = max > 0 ? max : MCPC_FRAME_DEFAULT_MAX;
+}
+
+void
+mcpc_framer_init_lines (mcpc_framer_t *f, size_t max)
+{
+  mcpc_framer_init (f, max);
+  f->line_mode = true;
 }
 
 void
@@ -76,6 +82,13 @@ mcpc_framer_push (mcpc_framer_t *f, unsigned char c)
     {
       if (c != '{')
 	return MCPC_FRAME_MORE;	// between objects
+    }
+  else if (f->line_mode && c == '\n')
+    {
+      // the object is cut short by the end of the line: forget it and start over at the next one
+      const bool had_overflow = f->overflow;
+      mcpc_framer_next (f);
+      return had_overflow ? MCPC_FRAME_TOOBIG : MCPC_FRAME_BROKEN;
     }
 
   // track structure first so an oversized object is still skipped to its end

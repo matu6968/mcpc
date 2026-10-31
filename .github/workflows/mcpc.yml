@@ -11,7 +11,7 @@ jobs:
       - run: sudo apt-get install -y buildah podman
       - run: buildah from --name wctn docker.io/library/debian:bullseye
       - run: buildah run wctn -- apt-get update
-      - run: buildah run wctn -- apt-get install -y sudo bash gcc make
+      - run: buildah run wctn -- apt-get install -y sudo bash gcc make python3
       - run: buildah copy wctn ../mcpc /mcpc
       - run: buildah run wctn -- bash -c "cd /mcpc && CC=gcc make tst"
       - run: buildah run wctn -- bash -c "cd /mcpc && CC=gcc make install"
@@ -25,7 +25,7 @@ jobs:
       - run: sudo apt-get install -y buildah podman
       - run: buildah from --name wctn docker.io/library/debian:bookworm
       - run: buildah run wctn -- apt-get update
-      - run: buildah run wctn -- apt-get install -y sudo bash gcc make
+      - run: buildah run wctn -- apt-get install -y sudo bash gcc make python3
       - run: buildah copy wctn ../mcpc /mcpc
       - run: buildah run wctn -- bash -c "cd /mcpc && CC=gcc make tst"
       - run: buildah run wctn -- bash -c "cd /mcpc && CC=gcc make install"
@@ -38,11 +38,41 @@ jobs:
       - run: ls -l .
       - run: sudo apt-get install -y buildah podman
       - run: buildah from --name wctn docker.io/library/fedora:41
-      - run: buildah run wctn -- dnf install -y bash gcc make
+      - run: buildah run wctn -- dnf install -y bash gcc make python3
       - run: buildah copy wctn ../mcpc /mcpc
       - run: buildah run wctn -- bash -c "cd /mcpc && CC=gcc make tst"
       - run: buildah run wctn -- bash -c "cd /mcpc && CC=gcc make install"
       - run: buildah run wctn -- bash -c "ls -l /usr/local/lib"
+  x64-linux-musl-alpine:
+    if: contains(github.event.head_commit.message, 'NO_GH_CI') == false
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get install -y buildah podman
+      - run: buildah from --name wctn docker.io/library/alpine:3.24
+      - run: buildah run wctn -- apk add --no-cache bash build-base python3
+      - run: buildah copy wctn ../mcpc /mcpc
+      - run: buildah run wctn -- bash -c "cd /mcpc && CC=gcc make tst"
+  x64-linux-sanitizers:
+    if: contains(github.event.head_commit.message, 'NO_GH_CI') == false
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y gcc make python3 python3-jsonschema
+      # the schemas the responses are validated against
+      - run: git clone --depth 1 https://github.com/modelcontextprotocol/modelcontextprotocol modelcontextprotocol
+      - run: make clean && ASAN=1 make tst
+      - run: make clean && make CC="gcc -fsanitize=thread -g" tst
+      - run: make clean && make CC="gcc -fsanitize=undefined -fno-sanitize-recover=undefined -g" tst
+  x64-linux-conformance:
+    if: contains(github.event.head_commit.message, 'NO_GH_CI') == false
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y gcc make python3
+      - run: make tst
+      # the official MCP conformance suite against the HTTP server
+      - run: make conformance
   x64-win2022-vs2022:
     if: contains(github.event.head_commit.message, 'NO_GH_CI') == false
     runs-on: windows-2022

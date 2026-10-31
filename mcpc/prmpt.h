@@ -30,6 +30,7 @@
 #include "anydata.h"
 #include "errcode.h"
 #include "ucbr.h"
+#include "ctx.h"
 
 typedef mcpc_anydata_t mcpc_prmptarghint_t;
 
@@ -38,6 +39,10 @@ typedef mcpc_anydata_t mcpc_prmptarg_t;
 typedef mcpc_anydata_t mcpc_prmpt_t;
 
 typedef void (*mcpc_prmpt_callcb_t) (const mcpc_prmpt_t *prmpt, mcpc_ucbr_t *ucbr);
+
+// Like mcpc_prmpt_callcb_t with the request context, which lets the callback ask the client for input
+// (see mcpc/ctx.h). Takes precedence.
+typedef void (*mcpc_prmpt_callcb2_t) (const mcpc_prmpt_t *prmpt, mcpc_ctx_t *ctx, mcpc_ucbr_t *ucbr);
 
 MCPC_API mcpc_prmptarg_t *
 mcpc_prmptarg_new (const char8_t *name, const size_t name_len, const char8_t *desc, const size_t desc_len);
@@ -94,5 +99,23 @@ mcpc_prmpt_get_callcb (const mcpc_prmpt_t *prmpt, mcpc_prmpt_callcb_t *ret);
 
 MCPC_API mcpc_errcode_t
 mcpc_prmpt_set_callcb (mcpc_prmpt_t *prmpt, mcpc_prmpt_callcb_t cb);
+
+MCPC_API mcpc_errcode_t
+mcpc_prmpt_set_callcb2 (mcpc_prmpt_t *prmpt, mcpc_prmpt_callcb2_t cb);
+
+// Arguments are required unless said otherwise. A call missing a required one fails with -32602.
+MCPC_API mcpc_errcode_t
+mcpc_prmptarg_set_required (mcpc_prmptarg_t *prmptarg, bool required);
+
+MCPC_API bool
+mcpc_prmptarg_is_required (const mcpc_prmptarg_t *prmptarg);
+
+// Whether the current call supplied a value for the argument (use it for optional ones).
+MCPC_API bool
+mcpc_prmptarg_is_provided (const mcpc_prmptarg_t *prmptarg);
+
+#define mcpc_prmpt_set_title mcpc_anydata_set_title
+#define mcpc_prmpt_set_icons_json mcpc_anydata_set_icons_json
+#define mcpc_prmpt_set_meta_json mcpc_anydata_set_meta_json
 
 #endif

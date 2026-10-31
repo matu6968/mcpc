@@ -25,9 +25,11 @@
 #include "visb.h"
 #include "errcode.h"
 #include "tool.h"
+#include "prmpt.h"
 #include "rsc.h"
 #include "server.h"
 #include "ucbr.h"
+#include "ctx.h"
 
 
 #endif

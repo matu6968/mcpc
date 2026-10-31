@@ -406,13 +406,62 @@ mjson_unescape(const char* s, int len, char* to, int n)
   int i, j;
   for (i = 0, j = 0; i < len && j < n; i++, j++) {
     if (s[i] == '\\' && i + 5 < len && s[i + 1] == 'u') {
-      //  \uXXXX escape. We could process a simple one-byte chars
-      // \u00xx from the ASCII range. More complex chars would require
-      // dragging in a UTF8 library, which is too much for us
-      if (s[i + 2] != '0' || s[i + 3] != '0')
-        return -1; // Too much, give up
-      ((unsigned char*)to)[j] = mjson_unhex_nimble(s + i + 4);
+      // \uXXXX, decoded to UTF-8. A high surrogate must be followed by a low one to form a
+      // character above U+FFFF; a lone surrogate cannot be encoded and becomes U+FFFD.
+      unsigned cp = 0;
+      int k;
+      for (k = 2; k < 6; k++) {
+        const int c = (unsigned char)s[i + k];
+        const int v = (c >= '0' && c <= '9') ? c - '0' : (c >= 'a' && c <= 'f') ? c - 'a' + 10 :
+                      (c >= 'A' && c <= 'F') ? c - 'A' + 10 : -1;
+        if (v < 0)
+          return -1; // not a hex digit
+        cp = cp * 16 + (unsigned)v;
+      }
       i += 5;
+      if (cp >= 0xD800 && cp <= 0xDBFF) {
+        unsigned lo = 0;
+        int ok = i + 6 < len && s[i + 1] == '\\' && s[i + 2] == 'u';
+        for (k = 3; ok && k < 7; k++) {
+          const int c = (unsigned char)s[i + k];
+          const int v = (c >= '0' && c <= '9') ? c - '0' : (c >= 'a' && c <= 'f') ? c - 'a' + 10 :
+                        (c >= 'A' && c <= 'F') ? c - 'A' + 10 : -1;
+          if (v < 0)
+            ok = 0;
+          else
+            lo = lo * 16 + (unsigned)v;
+        }
+        if (ok && lo >= 0xDC00 && lo <= 0xDFFF) {
+          cp = 0x10000 + ((cp - 0xD800) << 10) + (lo - 0xDC00);
+          i += 6;
+        } else {
+          cp = 0xFFFD;
+        }
+      } else if (cp >= 0xDC00 && cp <= 0xDFFF) {
+        cp = 0xFFFD;
+      }
+      {
+        const int nb = cp < 0x80 ? 1 : cp < 0x800 ? 2 : cp < 0x10000 ? 3 : 4;
+        unsigned char* out = (unsigned char*)to + j;
+        if (j + nb >= n)
+          return -1; // no room for the bytes and the terminator
+        if (nb == 1) {
+          out[0] = (unsigned char)cp;
+        } else if (nb == 2) {
+          out[0] = (unsigned char)(0xC0 | (cp >> 6));
+          out[1] = (unsigned char)(0x80 | (cp & 0x3F));
+        } else if (nb == 3) {
+          out[0] = (unsigned char)(0xE0 | (cp >> 12));
+          out[1] = (unsigned char)(0x80 | ((cp >> 6) & 0x3F));
+          out[2] = (unsigned char)(0x80 | (cp & 0x3F));
+        } else {
+          out[0] = (unsigned char)(0xF0 | (cp >> 18));
+          out[1] = (unsigned char)(0x80 | ((cp >> 12) & 0x3F));
+          out[2] = (unsigned char)(0x80 | ((cp >> 6) & 0x3F));
+          out[3] = (unsigned char)(0x80 | (cp & 0x3F));
+        }
+        j += nb - 1;
+      }
     } else if (s[i] == '\\' && i + 1 < len) {
       int c = mjson_esc(s[i + 1], 0);
       if (c == 0)
@@ -803,14 +852,42 @@ mjson_print_dbl(mjson_print_fn_t fn, void* fnd, double d, int width)
 int
 mjson_print_str(mjson_print_fn_t fn, void* fnd, const char* s, int len)
 {
+  // The output must always be valid JSON whatever bytes we are given: control characters are escaped,
+  // and anything that is not well-formed UTF-8 becomes U+FFFD instead of being copied through.
   int i, n = fn("\"", 1, fnd);
   for (i = 0; i < len; i++) {
-    char c = (char)(unsigned char)mjson_escape(s[i]);
+    const unsigned char u = (unsigned char)s[i];
+    char c = (char)(unsigned char)mjson_escape((char)u);
     if (c) {
       n += fn("\\", 1, fnd);
       n += fn(&c, 1, fnd);
-    } else {
+    } else if (u < 0x20) {
+      static const char hex[] = "0123456789abcdef";
+      char esc[6] = { '\\', 'u', '0', '0', hex[u >> 4], hex[u & 15] };
+      n += fn(esc, 6, fnd);
+    } else if (u < 0x80) {
       n += fn(&s[i], 1, fnd);
+    } else {
+      int k = 0;
+      unsigned cp = 0;
+      if (u >= 0xC2 && u <= 0xDF) { k = 1; cp = u & 0x1F; }
+      else if (u >= 0xE0 && u <= 0xEF) { k = 2; cp = u & 0x0F; }
+      else if (u >= 0xF0 && u <= 0xF4) { k = 3; cp = u & 0x07; }
+      int ok = k > 0 && i + k < len;
+      int j;
+      for (j = 1; ok && j <= k; j++) {
+        const unsigned char cc = (unsigned char)s[i + j];
+        if ((cc & 0xC0) != 0x80) ok = 0;
+        else cp = (cp << 6) | (cc & 0x3F);
+      }
+      if (ok && ((k == 2 && cp < 0x800) || (k == 3 && (cp < 0x10000 || cp > 0x10FFFF)) || (cp >= 0xD800 && cp <= 0xDFFF)))
+        ok = 0;
+      if (ok) {
+        n += fn(&s[i], k + 1, fnd);
+        i += k;
+      } else {
+        n += fn("\\ufffd", 6, fnd);
+      }
     }
   }
   return n + fn("\"", 1, fnd);

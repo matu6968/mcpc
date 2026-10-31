@@ -36,6 +36,9 @@ typedef struct retbuf
 {
   struct mjson_fixedbuf fb;
   bool oom;
+  unsigned feat;		// MCPC_FEAT_* of the revision being serialized for, gates newer fields
+  unsigned long ttl_ms;		// caching hints written into cacheable results of the modern revision
+  bool cache_public;
 } *retbuf_t;
 
 // upper bound of a single buffer (mjson_fixedbuf uses int sizes)

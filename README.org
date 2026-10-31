@@ -16,15 +16,26 @@ mcpc is a <b>M</b>odel <b>C</b>ontext <b>P</b>rotocol library in modern <b>C</b>
 :CUSTOM_ID: features
 :END:
 
-| Features        | Server | Client |
-|-----------------+--------+--------|
-| Tool            | ✅     | 🔨     |
-| Resource        | ✅     | 🔨     |
-| Prompt          | ✅     | 🔨     |
-| Completion      | ✅     | 🔨     |
-| STDIO Transport | ✅     | 🔨     |
-| HTTP Transport  | 🔨     | 🔨     |
-| Others          | 🔨     | 🔨     |
+Protocol revisions =2024-11-05= up to =2026-07-28= are served by the same server, each client gets the
+revision it asks for.
+
+| Features                                              | Server | Client |
+|-------------------------------------------------------+--------+--------|
+| Tools (structured output, all content types)          | ✅     | 🔨     |
+| Resources (read, templates, subscriptions)            | ✅     | 🔨     |
+| Prompts (text, image, audio, embedded resources)      | ✅     | 🔨     |
+| Completion                                            | ✅     | 🔨     |
+| Logging, progress, cancellation, pagination           | ✅     | 🔨     |
+| Elicitation, sampling, roots (asking the client)      | ✅     | 🔨     |
+| STDIO Transport                                       | ✅     | 🔨     |
+| Streamable HTTP Transport                             | ✅     | 🔨     |
+| Tasks extension, OAuth authorization, TLS             | 🔨     | 🔨     |
+
+See [[file:misc/guide.md][misc/guide.md]] for how to use them and [[file:misc/compat.md][misc/compat.md]] for
+revisions, limits and what is not covered.
+
+The server is checked against the official JSON schemas of every revision and passes the official
+MCP conformance suite (=make conformance=).
 
 
 * Supported Platforms

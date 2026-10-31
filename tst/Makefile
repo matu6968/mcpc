@@ -45,6 +45,10 @@ utst: itst-svcalc_EXEC
 
 itst: itst-svcalc_EXEC
 
+# the official conformance suite against the HTTP server (needs node and network)
+conformance: link
+	$(if $(is_dirsh) , sh conformance.sh ./itst-svcalc.out )
+
 
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 # itst-svcalc
@@ -109,4 +113,8 @@ itst-svcalc_EXEC: itst-svcalc_LINKE
 	$(if $(and $(is_dirsh),$(shell command -v python3 2>/dev/null)) , python3 -I rpctst.py ./itst-svcalc.out )
 	$(if $(and $(is_dirsh),$(shell command -v python3 2>/dev/null),$(is_valg)) , python3 -I rpctst.py ./itst-svcalc.out valgrind )
 	$(if $(and $(is_dirsh),$(if $(shell command -v python3 2>/dev/null),,x)) , @echo python3 not found: skipping rpctst.py )
+	# every message checked against the official JSON schemas (needs python3 with jsonschema and the spec checkout)
+	$(if $(and $(is_dirsh),$(shell command -v python3 2>/dev/null)) , python3 -I schematst.py ./itst-svcalc.out ../modelcontextprotocol )
+	# Streamable HTTP end to end over real sockets (needs python3)
+	$(if $(and $(is_dirsh),$(shell command -v python3 2>/dev/null)) , python3 -I httptst.py ./itst-svcalc.out )
 	@echo P A S S E D : $(patsubst %_EXEC,%,$@)

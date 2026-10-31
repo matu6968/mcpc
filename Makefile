@@ -35,6 +35,9 @@ itst: link
 
 tst: utst itst
 
+conformance: link
+	$(if $(is_sh),@for el in $(subdirs2); do $(MAKE) -C $$el link; $(MAKE) -C $$el $@; done)
+
 PREFIX ?= /usr/local
 INC_DIR = $(PREFIX)/include
 LIB_DIR = $(PREFIX)/lib

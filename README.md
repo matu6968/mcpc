@@ -27,74 +27,26 @@ mcpc is a <b>M</b>odel <b>C</b>ontext <b>P</b>rotocol library in modern <b>C</b>
 
 # MCP Features
 
-<table border="2" cellspacing="0" cellpadding="6" rules="groups" frame="hsides">
+Protocol revisions `2024-11-05` up to `2026-07-28` are served by the same server, each client gets the
+revision it asks for.
 
+| Features                                         | Server | Client |
+| ------------------------------------------------ | ------ | ------ |
+| Tools (structured output, all content types)     | ✅     | 🔨     |
+| Resources (read, templates, subscriptions)       | ✅     | 🔨     |
+| Prompts (text, image, audio, embedded resources) | ✅     | 🔨     |
+| Completion                                       | ✅     | 🔨     |
+| Logging, progress, cancellation, pagination      | ✅     | 🔨     |
+| Elicitation, sampling, roots (asking the client) | ✅     | 🔨     |
+| STDIO Transport                                  | ✅     | 🔨     |
+| Streamable HTTP Transport                        | ✅     | 🔨     |
+| Tasks extension, OAuth authorization, TLS        | 🔨     | 🔨     |
 
-<colgroup>
-<col  class="org-left" />
+See [misc/guide.md](misc/guide.md) for how to use them and [misc/compat.md](misc/compat.md) for
+revisions, limits and what is not covered.
 
-<col  class="org-left" />
-
-<col  class="org-left" />
-</colgroup>
-<thead>
-<tr>
-<th scope="col" class="org-left">Features</th>
-<th scope="col" class="org-left">Server</th>
-<th scope="col" class="org-left">Client</th>
-</tr>
-</thead>
-
-<tbody>
-<tr>
-<td class="org-left">Tool</td>
-<td class="org-left">✅</td>
-<td class="org-left">🔨</td>
-</tr>
-
-
-<tr>
-<td class="org-left">Resource</td>
-<td class="org-left">✅</td>
-<td class="org-left">🔨</td>
-</tr>
-
-
-<tr>
-<td class="org-left">Prompt</td>
-<td class="org-left">✅</td>
-<td class="org-left">🔨</td>
-</tr>
-
-
-<tr>
-<td class="org-left">Completion</td>
-<td class="org-left">✅</td>
-<td class="org-left">🔨</td>
-</tr>
-
-
-<tr>
-<td class="org-left">STDIO Transport</td>
-<td class="org-left">✅</td>
-<td class="org-left">🔨</td>
-</tr>
-
-
-<tr>
-<td class="org-left">HTTP Transport</td>
-<td class="org-left">🔨</td>
-<td class="org-left">🔨</td>
-</tr>
-
-
-<tr>
-<td class="org-left">Others</td>
-<td class="org-left">🔨</td>
-<td class="org-left">🔨</td>
-</tr>
-</tbody>
-</table>
+The server is checked against the official JSON schemas of every revision and passes the official
+MCP conformance suite (`make conformance`).
 
 
 <a id="platforms"></a>

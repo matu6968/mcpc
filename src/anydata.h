@@ -37,7 +37,7 @@
 #ifdef MCPC_C23GIVUP_FIXENUM
 enum mcpc_anydata_flags
 #else
-enum mcpc_anydata_flags:u16_t
+enum mcpc_anydata_flags:u32_t
 #endif
 {
   ANYDATA_FL_REQUIRED = 1 << 0,
@@ -53,12 +53,55 @@ enum mcpc_anydata_flags:u16_t
   ANYDATA_FL_USRCBRES_PRMPTCALL_ASSIST = 1 << 10,
   ANYDATA_FL_COMPLT = 1 << 11,
   ANYDATA_FL_PRMPTARGHINT = 1 << 12,
+  ANYDATA_FL_PROVIDED = 1 << 13,
+  ANYDATA_FL_RSCTPL = 1 << 14,	// toolprop: the current call supplied a value
 };
 typedef enum mcpc_anydata_flags mcpc_anydata_flags_t;
+
+// Optional fields, allocated on first use so plain anydata stays small.
+enum mcpc_xslot
+{
+  MCPC_X_TITLE = 0,
+  MCPC_X_ICONS,			// raw JSON array
+  MCPC_X_ANNOT,			// raw JSON object
+  MCPC_X_META,			// raw JSON object
+  MCPC_X_INSCHEMA,		// raw JSON object, overrides the generated inputSchema
+  MCPC_X_OUTSCHEMA,		// raw JSON object
+  MCPC_X_DESC,			// description for types whose meta2 is taken
+  MCPC_X_URITPL,		// RFC 6570 uriTemplate
+  MCPC_X_URI,			// uri that does not fit meta1 (content blocks)
+  MCPC_X_MIME,			// mimeType as text, overrides data_mime
+  MCPC_X_COUNT
+};
+typedef enum mcpc_xslot mcpc_xslot_t;
+
+// What a callback result entry is. 0 is a plain text block (or a prompt message).
+enum mcpc_ckind
+{
+  MCPC_CK_TEXT = 0,
+  MCPC_CK_IMAGE,		// bytes in data, mime in X_MIME
+  MCPC_CK_AUDIO,
+  MCPC_CK_RESLINK,		// name in meta1, uri in X_URI, X_DESC, X_MIME, size in extra
+  MCPC_CK_RES_TEXT,		// uri in X_URI, mime in X_MIME, text in data (embedded / resources/read)
+  MCPC_CK_RES_BLOB,		// same with bytes in data
+  MCPC_CK_STRUCTURED,		// result level structuredContent, raw JSON in data
+  MCPC_CK_RESMETA,		// result level _meta, raw JSON in data
+};
+typedef enum mcpc_ckind mcpc_ckind_t;
+
+struct mcpc_anyextra
+{
+  char *s[MCPC_X_COUNT];	// NUL-terminated copies, NULL when unset
+  void (*cb) (void);		// type specific callback (resource read, tool call with a context)
+  void (*cb2) (void);		// callback with a request context (resource read, prompt get)
+  size_t size;			// resource size in bytes, 0 = unknown
+  bool has_size;
+};
 
 struct mcpc_anydata
 {
   u8_t meta1_len;
+  u8_t ckind;			// mcpc_ckind_t, only meaningful for callback results
   mcpc_mime_t data_mime;
   mcpc_anytype_t data_typ;
   mcpc_anydata_flags_t flags;
@@ -67,9 +110,11 @@ struct mcpc_anydata
   const char8_t *meta1;
   const char8_t *meta2;
   mcpc_anypool_t *chd_pool;
+  struct mcpc_anyextra *extra;
   union
   {
     uintmax_t data_intlk;
+    double data_dbl;
     uintptr_t *data_arrlk;
   };
 };
@@ -99,6 +144,15 @@ void mcpc_anydata_copy (mcpc_anydata_t * dest_data, const mcpc_anydata_t * src_d
 
 mcpc_errcode_t mcpc_anydata_set_meta1nt (mcpc_anydata_t * anydata, const char8_t * meta1);
 
+// Store a copy of s in an extras slot. expect_tok is an MJSON_TOK_* the text must parse as
+// (0 for plain text); NULL s clears the slot.
+mcpc_errcode_t mcpc_anydata_xset (mcpc_anydata_t * data, mcpc_xslot_t slot, const char *s, size_t len, int expect_tok);
+
+// NUL-terminated slot value or NULL
+const char *mcpc_anydata_xget (const mcpc_anydata_t * data, mcpc_xslot_t slot);
+
+struct mcpc_anyextra *mcpc_anydata_xensure (mcpc_anydata_t * data);
+
 mcpc_errcode_t mcpc_anydata_set_i8 (mcpc_anydata_t * anydata, i8_t val);
 
 mcpc_errcode_t mcpc_anydata_set_u8 (mcpc_anydata_t * anydata, u8_t val);
@@ -116,6 +170,18 @@ mcpc_errcode_t mcpc_anydata_set_i64 (mcpc_anydata_t * anydata, i64_t val);
 mcpc_errcode_t mcpc_anydata_set_u64 (mcpc_anydata_t * anydata, u64_t val);
 
 mcpc_errcode_t mcpc_anydata_set_func (mcpc_anydata_t * anydata, void *val);
+
+mcpc_errcode_t mcpc_anydata_set_bool (mcpc_anydata_t * anydata, bool val);
+
+mcpc_errcode_t mcpc_anydata_get_bool (const mcpc_anydata_t * anydata, bool * ret);
+
+mcpc_errcode_t mcpc_anydata_set_f64 (mcpc_anydata_t * anydata, double val);
+
+mcpc_errcode_t mcpc_anydata_get_f64 (const mcpc_anydata_t * anydata, double *ret);
+
+mcpc_errcode_t mcpc_anydata_set_json (mcpc_anydata_t * anydata, const char8_t * json, size_t json_len);
+
+mcpc_errcode_t mcpc_anydata_get_json (const mcpc_anydata_t * anydata, char8_t * ret, size_t ret_cap, size_t *ret_len);
 
 mcpc_errcode_t mcpc_anydata_get_i8 (const mcpc_anydata_t * anydata, i8_t * ret);
 

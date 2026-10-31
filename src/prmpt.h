@@ -31,7 +31,6 @@ typedef mcpc_anypool_t mcpc_prmptargpool_t;
 
 void mcpc_prmptarg_free (mcpc_prmptarg_t * prmptarg);
 
-bool mcpc_prmptarg_is_required (const mcpc_prmptarg_t * prmptarg);
 
 mcpc_errcode_t mcpc_prmptarg_getref_name (const mcpc_prmptarg_t * prmptarg, const char8_t ** ret, size_t *ret_len);
 
@@ -39,7 +38,6 @@ mcpc_errcode_t mcpc_prmptarg_getref_desc (const mcpc_prmptarg_t * prmptarg, cons
 
 mcpc_errcode_t mcpc_prmptarg_get_data_type (const mcpc_prmptarg_t * prmptarg, mcpc_anytype_t * ret);
 
-mcpc_errcode_t mcpc_prmptarg_set_required (mcpc_prmptarg_t * prmptarg, bool fl);
 
 mcpc_errcode_t mcpc_prmptarg_set_nament (mcpc_prmptarg_t * prmptarg, const char8_t * name);
 
